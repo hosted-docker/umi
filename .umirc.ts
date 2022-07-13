@@ -5,6 +5,8 @@ export default {
   mfsu: false,
   routePrefetch: {},
   manifest: {},
+  base: '/mirror/umi-next',
+  publicPath: '/',
   plugins: ['@umijs/plugin-docs'],
   conventionRoutes: {
     exclude: [/\/components\//],
