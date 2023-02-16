@@ -14,6 +14,8 @@ interface IOpts {
   pluginDynamicImportNode: any;
   pluginAutoCSSModules: any;
   stripExports: { exports: string[] };
+  classPropertiesLoose: any;
+  pluginStyledComponents: any;
 }
 
 export default (_context: any, opts: IOpts) => {
@@ -43,7 +45,6 @@ export default (_context: any, opts: IOpts) => {
         {
           runtime: 'automatic',
           development: process.env.NODE_ENV === 'development',
-          importSource: 'react',
           ...opts.presetReact,
         },
       ],
@@ -52,10 +53,6 @@ export default (_context: any, opts: IOpts) => {
           '@umijs/bundler-utils/compiled/babel/preset-typescript',
         ),
         {
-          // 支持 vue 后缀
-          allExtensions: true,
-          // 支持 tsx
-          isTSX: true,
           allowNamespaces: true,
           allowDeclareFields: true,
           // Why false?
@@ -68,6 +65,12 @@ export default (_context: any, opts: IOpts) => {
       ],
     ],
     plugins: [
+      opts.pluginStyledComponents && [
+        require.resolve('babel-plugin-styled-components'),
+        {
+          ...opts.pluginStyledComponents,
+        },
+      ],
       // TC39 Proposals
       // class-static-block
       // decorators
@@ -77,6 +80,40 @@ export default (_context: any, opts: IOpts) => {
         ),
         { legacy: true },
       ],
+      // Enable loose mode to use assignment instead of defineProperty
+      // Note:
+      // 'loose' mode configuration must be the same for
+      // * @babel/plugin-proposal-class-properties
+      // * @babel/plugin-proposal-private-methods
+      // * @babel/plugin-proposal-private-property-in-object
+      // (when they are enabled)
+      // ref: https://github.com/facebook/create-react-app/issues/4263
+      // ref: https://github.com/mobxjs/mobx/issues/1471
+      // ref: https://github.com/umijs/umi/issues/9396
+      // 不移动到 feature 里的原因是因为 decorators 有顺序要求
+      opts.classPropertiesLoose && [
+        require.resolve(
+          '@umijs/bundler-utils/compiled/babel/plugin-proposal-class-properties',
+        ),
+        { loose: true },
+      ],
+      opts.classPropertiesLoose && [
+        require.resolve(
+          '@umijs/bundler-utils/compiled/babel/plugin-proposal-private-methods',
+        ),
+        {
+          loose: true,
+        },
+      ],
+      opts.classPropertiesLoose && [
+        require.resolve(
+          '@umijs/bundler-utils/compiled/babel/plugin-proposal-private-property-in-object',
+        ),
+        {
+          loose: true,
+        },
+      ],
+
       // do-expressions
       [
         require.resolve(

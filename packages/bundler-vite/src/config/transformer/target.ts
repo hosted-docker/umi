@@ -1,5 +1,4 @@
 import type { IConfigProcessor } from '.';
-import type { Options } from '../../../compiled/@vitejs/plugin-legacy';
 import legacyPlugin from '../../../compiled/@vitejs/plugin-legacy';
 import * as lite from '../../../compiled/caniuse-lite';
 import { getBrowserlist } from './css';
@@ -36,10 +35,11 @@ export default (function target(userConfig) {
     return false;
   }
   if (userConfig.targets && isLegacyBrowser(userConfig.targets)) {
-    const legacyOpts: Options = {
+    const legacyOpts: any = {
       targets: getBrowserlist(userConfig.targets),
       polyfills: false,
       ignoreBrowserslistConfig: true,
+      externalSystemJS: true,
     };
 
     config.plugins!.push(legacyPlugin(legacyOpts));

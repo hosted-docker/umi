@@ -6,6 +6,29 @@
 
 约定 `src/app.tsx` 为运行时配置。
 
+## TypeScript 提示
+
+如果你想在写配置时也有提示，可以通过 umi 的 defineApp 方法定义配置。
+
+```js
+import { defineApp } from 'umi';
+export default defineApp({
+  layout: () => {
+    return {
+      title: 'umi',
+    };
+  },
+});
+
+// or
+import { RuntimeConfig } from 'umi';
+export const layout: RuntimeConfig['layout'] = () => {
+  return {
+    title: 'umi',
+  };
+};
+```
+
 ## 配置项
 
 > 以下配置项按字母排序。
@@ -14,23 +37,56 @@
 
 如果你使用的 dva，那么支持配置 dva 插件的运行时配置，具体参考[插件配置](../max/dva)。
 
-### getInitialState
-
-定义初始化数据。通常为了提供给内置布局功能和权限相关用户信息，我们需要在应用启动的最初阶段请求一些初始化数据，在 Umi 中，我们内置了插件 `initial-state`，该插件暴露一个运行时配置 `getInitialState`，该配置接收一个方法，你需要通过该方法返回相关数据，例如：
+比如：
 
 ```ts
-// src/app.ts(x)
-export async function getInitialState() {
-  return {
-    userName: '用户名',
-    userId: '用户 ID',
-  };
-}
+export default {
+  dva: {
+    immer: true,
+    extraModels: [],
+  },
+};
 ```
+
+#### extraModels
+
+- Type: string[]
+- Default: [] 配置额外到 dva model。
+
+#### immer
+
+- Type: boolean | object
+- Default: false 表示是否启用 immer 以方便修改 reducer。
+
+注：如需兼容 IE11，需配置 `{ immer: { enableES5: true }}`。
+
+### 数据流
+
+若你需要定义初始化数据，使用 `getInitialState` 、`useModel` 等 [数据流](../max/data-flow) 相关功能：
+
+1. 你可以创建自带数据流功能的 `@umijs/max` 项目，详见 [Umi max 简介](../max/introduce) 。
+
+2. 或者手动开启数据流功能的插件使用该功能：
+
+   ```bash
+     pnpm add -D @umijs/plugins
+   ```
+
+   ```ts
+   // .umirc.ts
+   export default {
+     plugins: [
+       '@umijs/plugins/dist/initial-state',
+       '@umijs/plugins/dist/model',
+     ],
+     initialState: {},
+     model: {},
+   };
+   ```
 
 ### layout
 
-修改[内置布局](../guides/layout-menu)的配置，比如配置退出登陆、自定义导航暴露的渲染区域等。
+修改[内置布局](../max/layout-menu)的配置，比如配置退出登陆、自定义导航暴露的渲染区域等。
 
 > 注意：需要开启 [layout](../api/config#layout) 插件，才能使用它的运行时配置。
 
@@ -42,25 +98,31 @@ export const layout = {
 
 更多具体配置参考[插件文档](../max/layout-menu#运行时配置)。
 
-### onRouteChange(\{ routes, clientRoutes, location, action \})
+### onRouteChange(\{ routes, clientRoutes, location, action, basename \})
 
 在初始加载和路由切换时做一些事情。
 
 比如用于做埋点统计，
 
-```bash
-export function onRouteChange({ location, clientRoutes, routes, action }) {
+```ts
+export function onRouteChange({
+  location,
+  clientRoutes,
+  routes,
+  action,
+  basename,
+}) {
   bacon(location.pathname);
 }
 ```
 
 比如用于设置标题，
 
-```bash
-import { matchRoutes } from 'umi'
+```ts
+import { matchRoutes } from 'umi';
 
 export function onRouteChange({ clientRoutes, location }) {
-  const route = matchRoutes(clientRoutes, location.pathname)?.pop()?.route
+  const route = matchRoutes(clientRoutes, location.pathname)?.pop()?.route;
   if (route) {
     document.title = route.title || '';
   }
@@ -75,9 +137,9 @@ export function patchRoutes({ routes, routeComponents }) {
 }
 ```
 
- - `routes`: 打平的路由列表。
+- `routes`: 打平的路由列表。
 
- - `routeComponents`: 路由对应的组件映射。
+- `routeComponents`: 路由对应的组件映射。
 
 注：如需动态更新路由，建议使用 `patchClientRoutes()` ，否则你可能需要同时修改 `routes` 和 `routeComponents`。
 
@@ -87,15 +149,44 @@ export function patchRoutes({ routes, routeComponents }) {
 
 比如在最前面添加一个 `/foo` 路由，
 
-```ts
+```tsx
 import Page from '@/extraRoutes/foo';
 
 export function patchClientRoutes({ routes }) {
   routes.unshift({
     path: '/foo',
-    component: <Page />
+    element: <Page />,
   });
 }
+```
+
+比如在最前面添加一个重定向路由：
+
+```tsx
+import { Navigate } from 'umi';
+
+export const patchClientRoutes = ({ routes }) => {
+  routes.unshift({
+    path: '/',
+    element: <Navigate to="/home" replace />,
+  });
+};
+```
+
+比如添加一个嵌套路由：
+
+```tsx
+import Page from '@/extraRoutes/foo';
+
+export const patchClientRoutes = ({ routes }) => {
+  routes.push({
+    path: '/group',
+    children: [{
+      path: '/group/page',
+      element: <Page />,
+    }],
+  });
+};
 ```
 
 比如和 `render` 配置配合使用，请求服务端根据响应动态更新路由，
@@ -109,10 +200,12 @@ export function patchClientRoutes({ routes }) {
 }
 
 export function render(oldRender) {
-  fetch('/api/routes').then(res=>res.json()).then((res) => {
-    extraRoutes = res.routes;
-    oldRender();
-  })
+  fetch('/api/routes')
+    .then((res) => res.json())
+    .then((res) => {
+      extraRoutes = res.routes;
+      oldRender();
+    });
 }
 ```
 

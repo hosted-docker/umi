@@ -1,14 +1,20 @@
 /// <reference types="cypress" />
 
 describe('data-flow', function () {
+  beforeEach(() => {
+    Cypress.automation('remote:debugger:protocol', {
+      command: 'Network.setCacheDisabled',
+      params: { cacheDisabled: true },
+    });
+  });
+
   context('dva', () => {
     beforeEach(() => {
+      cy.intercept(/dva.async.js$/).as('chunkLoaded');
       cy.visit('/data-flow/dva');
     });
 
     it('run count model', () => {
-      cy.intercept(/dva.async.js$/).as('chunkLoaded');
-
       cy.wait('@chunkLoaded');
 
       cy.contains('count: 0');
@@ -21,12 +27,11 @@ describe('data-flow', function () {
 
   context('use-model', () => {
     beforeEach(() => {
+      cy.intercept(/use-model.async.js$/).as('chunkLoaded');
       cy.visit('/data-flow/use-model');
     });
 
     it('render data from use-model', () => {
-      cy.intercept(/use-model.async.js$/).as('chunkLoaded');
-
       cy.wait('@chunkLoaded');
 
       cy.get('.ant-layout-content').within(() => {

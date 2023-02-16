@@ -1,5 +1,6 @@
 import type { RequestHandler } from '@umijs/bundler-webpack';
 import {
+  address,
   chalk,
   lodash,
   logger,
@@ -7,11 +8,12 @@ import {
   rimraf,
   winPath,
 } from '@umijs/utils';
-import { readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { basename, join } from 'path';
+import { Worker } from 'worker_threads';
 import { DEFAULT_HOST, DEFAULT_PORT } from '../../constants';
-import { AutoUpdateSrcCodeCache } from '../../libs/folderCache/AutoUpdateSourceCodeCache';
-import { IApi } from '../../types';
+import { LazySourceCodeCache } from '../../libs/folderCache/LazySourceCodeCache';
+import type { GenerateFilesFn, IApi, OnConfigChangeFn } from '../../types';
 import { lazyImportFromCurrentPkg } from '../../utils/lazyImportFromCurrentPkg';
 import { createRouteMiddleware } from './createRouteMiddleware';
 import { faviconMiddleware } from './faviconMiddleware';
@@ -86,7 +88,7 @@ PORT=8888 umi dev
       // );
 
       // generate files
-      async function generate(opts: { isFirstTime?: boolean; files?: any }) {
+      const generate: GenerateFilesFn = async (opts) => {
         await api.applyPlugins({
           key: 'onGenerateFiles',
           args: {
@@ -94,7 +96,7 @@ PORT=8888 umi dev
             isFirstTime: opts.isFirstTime,
           },
         });
-      }
+      };
 
       await generate({
         isFirstTime: true,
@@ -110,6 +112,7 @@ PORT=8888 umi dev
           ...expandJSPaths(join(absSrcPath, 'app')),
           ...expandJSPaths(join(absSrcPath, 'global')),
           ...expandCSSPaths(join(absSrcPath, 'global')),
+          ...expandCSSPaths(join(absSrcPath, 'overrides')),
         ].filter(Boolean),
       });
       lodash.uniq<string>(watcherPaths.map(winPath)).forEach((p: string) => {
@@ -131,22 +134,28 @@ PORT=8888 umi dev
         path: pkgPath,
         addToUnWatches: true,
         onChange() {
-          const origin = api.appData.pkg;
-          api.appData.pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-          api.applyPlugins({
-            key: 'onCheckPkgJSON',
-            args: {
-              origin,
-              current: api.appData.pkg,
-            },
-          });
-          api.applyPlugins({
-            key: 'onPkgJSONChanged',
-            args: {
-              origin,
-              current: api.appData.pkg,
-            },
-          });
+          // Why try catch?
+          // ref: https://github.com/umijs/umi/issues/8608
+          try {
+            const origin = api.appData.pkg;
+            api.appData.pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+            api.applyPlugins({
+              key: 'onCheckPkgJSON',
+              args: {
+                origin,
+                current: api.appData.pkg,
+              },
+            });
+            api.applyPlugins({
+              key: 'onPkgJSONChanged',
+              args: {
+                origin,
+                current: api.appData.pkg,
+              },
+            });
+          } catch (e) {
+            logger.error(e);
+          }
         },
       });
 
@@ -182,8 +191,8 @@ PORT=8888 umi dev
               );
               await generate({ isFirstTime: false });
             }
-            for (const fn of data.fns) {
-              fn();
+            for await (const fn of data.fns) {
+              await (fn as OnConfigChangeFn)({ generate });
             }
           },
         }),
@@ -205,9 +214,48 @@ PORT=8888 umi dev
         });
       });
 
-      await api.applyPlugins({
-        key: 'onBeforeCompiler',
-      });
+      // watch public dir change and restart server
+      function watchPublicDirChange() {
+        const publicDir = join(api.cwd, 'public');
+        const isPublicAvailable =
+          existsSync(publicDir) && readdirSync(publicDir).length;
+        let restarted = false;
+        const restartServer = () => {
+          if (restarted) return;
+          restarted = true;
+          logger.event(`public dir changed, restart server...`);
+          api.restartServer();
+        };
+        watch({
+          path: publicDir,
+          addToUnWatches: true,
+          onChange(event, path) {
+            if (isPublicAvailable) {
+              // listen public dir delete event
+              if (event === 'unlinkDir' && path === publicDir) {
+                restartServer();
+              } else if (
+                // listen public files all deleted
+                event === 'unlink' &&
+                existsSync(publicDir) &&
+                readdirSync(publicDir).length === 0
+              ) {
+                restartServer();
+              }
+            } else {
+              // listen public dir add first file event
+              if (
+                event === 'add' &&
+                existsSync(publicDir) &&
+                readdirSync(publicDir).length === 1
+              ) {
+                restartServer();
+              }
+            }
+          },
+        });
+      }
+      watchPublicDirChange();
 
       // start dev server
       const beforeMiddlewares = await api.applyPlugins({
@@ -249,28 +297,57 @@ PORT=8888 umi dev
       };
       const debouncedPrintMemoryUsage = lodash.debounce(printMemoryUsage, 5000);
 
-      let srcCodeCache: AutoUpdateSrcCodeCache | undefined;
+      let srcCodeCache: LazySourceCodeCache | undefined;
+      let startBuildWorker: (deps: any[]) => Worker = (() => {}) as any;
 
       if (api.config.mfsu?.strategy === 'eager') {
-        srcCodeCache = new AutoUpdateSrcCodeCache({
+        srcCodeCache = new LazySourceCodeCache({
           cwd: api.paths.absSrcPath,
-          cachePath: join(api.paths.absNodeModulesPath, '.cache', 'mfsu', 'v4'),
+          cachePath: join(
+            api.paths.absNodeModulesPath,
+            '.cache',
+            'mfsu',
+            'mfsu_v4',
+          ),
         });
-        await srcCodeCache.init();
+        await srcCodeCache!.init();
         addUnWatch(() => {
           srcCodeCache!.unwatch();
         });
+
+        let currentWorker: Worker | null = null;
+        const initWorker = () => {
+          currentWorker = new Worker(
+            join(__dirname, 'depBuildWorker/depBuildWorker.js'),
+          );
+          currentWorker.on('exit', () => {
+            initWorker();
+          });
+          return currentWorker;
+        };
+        currentWorker = initWorker();
+
+        startBuildWorker = () => {
+          return currentWorker!;
+        };
       }
 
-      const opts = {
-        config: api.config,
-        cwd: api.cwd,
-        rootDir: process.cwd(),
-        entry: {
+      const entry = await api.applyPlugins({
+        key: 'modifyEntry',
+        initialValue: {
           umi: join(api.paths.absTmpPath, 'umi.ts'),
         },
+      });
+
+      const opts: any = {
+        config: api.config,
+        pkg: api.pkg,
+        cwd: api.cwd,
+        rootDir: process.cwd(),
+        entry,
         port: api.appData.port,
         host: api.appData.host,
+        ip: api.appData.ip,
         ...(enableVite
           ? { modifyViteConfig }
           : { babelPreset, chainWebpack, modifyWebpackConfig }),
@@ -283,9 +360,9 @@ PORT=8888 umi dev
         ]),
         // vite 模式使用 ./plugins/ViteHtmlPlugin.ts 处理
         afterMiddlewares: enableVite
-          ? []
+          ? [middlewares.concat(faviconMiddleware)]
           : middlewares.concat([
-              createRouteMiddleware({ api }),
+              ...(api.config.mpa ? [] : [createRouteMiddleware({ api })]),
               // 放置 favicon 在 webpack middleware 之后，兼容 public 目录下有 favicon.ico 的场景
               // ref: https://github.com/umijs/umi/issues/8024
               faviconMiddleware,
@@ -321,7 +398,22 @@ PORT=8888 umi dev
           ...MFSU_EAGER_DEFAULT_INCLUDE,
           ...(api.config.mfsu?.include || []),
         ]),
+        startBuildWorker,
+        onBeforeMiddleware(app: any) {
+          api.applyPlugins({
+            key: 'onBeforeMiddleware',
+            args: {
+              app,
+            },
+          });
+        },
       };
+
+      await api.applyPlugins({
+        key: 'onBeforeCompiler',
+        args: { compiler: enableVite ? 'vite' : 'webpack', opts },
+      });
+
       if (enableVite) {
         await bundlerVite.dev(opts);
       } else {
@@ -335,6 +427,7 @@ PORT=8888 umi dev
       port: parseInt(String(process.env.PORT || DEFAULT_PORT), 10),
     });
     memo.host = process.env.HOST || DEFAULT_HOST;
+    memo.ip = address.ip();
     return memo;
   });
 

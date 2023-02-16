@@ -8,6 +8,7 @@ import { insertRoute, noop, patchMicroAppRoute } from './common';
 import { getMicroAppRouteComponent } from './getMicroAppRouteComponent';
 import { getMasterOptions, setMasterOptions } from './masterOptions';
 import { MasterOptions, MicroAppRoute } from './types';
+import { deepFilterLeafRoutes } from './routeUtils';
 
 let microAppRuntimeRoutes: MicroAppRoute[];
 
@@ -24,14 +25,20 @@ async function getMasterRuntime() {
 
 // modify route with "microApp" attribute to use real component
 function patchMicroAppRouteComponent(routes: any[]) {
-  const insertRoutes = microAppRuntimeRoutes.filter((r) => r.insert);
+  const insertRoutes = microAppRuntimeRoutes.filter(
+    (r) => r.insert || r.insertBefore || r.appendChildTo,
+  );
   // 先处理 insert 配置
   insertRoutes.forEach((route) => {
     insertRoute(routes, route);
   });
 
   const getRootRoutes = (routes: any[]) => {
-    const rootRoute = routes.find((route) => route.path === '/');
+    // 重定向根路由不能用作 microAppRuntimeRoutes 的父节点
+    const rootRoute = routes.find(
+      // 基于是否有 .to props 判断是否为 redirect
+      (route) => route.path === '/' && !route.element?.props?.to,
+    );
     if (rootRoute) {
       // 如果根路由是叶子节点，则直接返回其父节点
       if (!rootRoute.children?.length) {
@@ -60,7 +67,13 @@ function patchMicroAppRouteComponent(routes: any[]) {
       };
 
       patchRoute(microAppRoute);
-      !microAppRoute.insert && rootRoutes.unshift(microAppRoute);
+      if (
+        !microAppRoute.insert &&
+        !microAppRoute.insertBefore &&
+        !microAppRoute.appendChildTo
+      ) {
+        rootRoutes.unshift(microAppRoute);
+      }
     });
   }
 }
@@ -125,6 +138,15 @@ export async function render(oldRender: typeof noop) {
 }
 
 export function patchClientRoutes({ routes }: { routes: any[] }) {
+  const microAppRoutes = [].concat(
+    deepFilterLeafRoutes(routes),
+    deepFilterLeafRoutes(microAppRuntimeRoutes),
+  );
+  // 微应用的 routes 存到 masterOptions.microAppRoutes 下以供 MicroAppLink 使用
+  const masterOptions = getMasterOptions();
+  masterOptions.microAppRoutes = microAppRoutes;
+  setMasterOptions(masterOptions);
+
   if (microAppRuntimeRoutes) {
     patchMicroAppRouteComponent(routes);
   }

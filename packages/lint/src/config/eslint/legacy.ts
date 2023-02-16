@@ -27,6 +27,9 @@ module.exports = {
       jsx: true,
     },
     babelOptions: {
+      babelrc: false,
+      configFile: false,
+      browserslistConfigFile: false,
       presets: [require.resolve('@umijs/babel-preset-umi')],
     },
     requireConfigFile: false,

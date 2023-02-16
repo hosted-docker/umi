@@ -4,7 +4,7 @@ import {
   ProFormSelect,
   ProFormText,
   ProFormTextArea,
-} from '@ant-design/pro-form';
+} from '@ant-design/pro-components';
 import { Button, Result } from 'antd';
 import type { FC } from 'react';
 import type { BasicListItemDataType } from '../data.d';
@@ -25,7 +25,7 @@ const OperationModal: FC<OperationModalProps> = (props) => {
   }
   return (
     <ModalForm<BasicListItemDataType>
-      visible={visible}
+      open={visible}
       title={done ? null : `任务${current ? '编辑' : '添加'}`}
       className={styles.standardListForm}
       width={640}

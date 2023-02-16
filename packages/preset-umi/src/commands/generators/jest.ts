@@ -1,5 +1,5 @@
 import { GeneratorType } from '@umijs/core';
-import { logger } from '@umijs/utils';
+import { logger, semver } from '@umijs/utils';
 import { existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { IApi } from '../../types';
@@ -33,50 +33,99 @@ export default (api: IApi) => {
         initial: true,
       });
 
+      const hasSrc = api.paths.absSrcPath.endsWith('src');
+
+      const importSource = api.appData.umi.importSource;
+      const jestMajorVersion = `^${getJestVersion()}`;
       const basicDeps = {
-        jest: '^27',
-        '@types/jest': '^27',
+        jest: jestMajorVersion,
+        '@types/jest': jestMajorVersion,
         // we use `jest.config.ts` so jest needs ts and ts-node
         typescript: '^4',
         'ts-node': '^10',
+        'cross-env': '^7',
+      };
+      const reactTestingDeps = {
+        // `jest-environment-jsdom` is no longer included in jest >= 28
+        'jest-environment-jsdom': jestMajorVersion,
+        // RTL
+        '@testing-library/jest-dom': '^5',
+        '@testing-library/react': '^13',
       };
       const packageToInstall: Record<string, string> = res.willUseTLR
         ? {
             ...basicDeps,
-            '@testing-library/react': '^13',
-            '@testing-library/jest-dom': '^5.16.4',
+            ...reactTestingDeps,
             '@types/testing-library__jest-dom': '^5.14.5',
           }
         : basicDeps;
       h.addDevDeps(packageToInstall);
-      h.addScript('test', 'jest');
+      h.addScript(
+        'test',
+        'cross-env TS_NODE_TRANSPILE_ONLY=yes jest --passWithNoTests',
+      );
 
-      if (res.willUseTLR) {
-        writeFileSync(
-          join(api.cwd, 'jest-setup.ts'),
-          `import '@testing-library/jest-dom';
-          `.trimLeft(),
-        );
-        logger.info('Write jest-setup.ts');
-      }
+      const setupImports = res.willUseTLR
+        ? [
+            `import '@testing-library/jest-dom';`,
+            `import '${api.appData.umi.importSource}/test-setup'`,
+          ]
+        : [`import '${api.appData.umi.importSource}/test-setup'`];
 
-      const importSource = api.appData.umi.importSource;
+      writeFileSync(join(api.cwd, 'jest-setup.ts'), setupImports.join('\n'));
+      logger.info('Write jest-setup.ts');
+
+      const collectCoverageFrom = hasSrc
+        ? [
+            'src/**/*.{ts,js,tsx,jsx}',
+            '!src/.umi/**',
+            '!src/.umi-test/**',
+            '!src/.umi-production/**',
+          ]
+        : [
+            '**/*.{ts,tsx,js,jsx}',
+            '!.umi/**',
+            '!.umi-test/**',
+            '!.umi-production/**',
+            '!.umirc.{js,ts}',
+            '!.umirc.*.{js,ts}',
+            '!jest.config.{js,ts}',
+            '!coverage/**',
+            '!dist/**',
+            '!config/**',
+            '!mock/**',
+          ];
+
       writeFileSync(
         join(api.cwd, 'jest.config.ts'),
         `
 import { Config, configUmiAlias, createConfig } from '${importSource}/test';
 
 export default async () => {
-  return (await configUmiAlias({
-    ...createConfig({
-      target: 'browser',
-    }),
-    ${res.willUseTLR ? `setupFilesAfterEnv: ['<rootDir>/jest-setup.ts'],` : ''}
-    // if you require some es-module npm package, please uncomment below line and insert your package name
-    // transformIgnorePatterns: ['node_modules/(?!.*(lodash-es|your-es-pkg-name)/)']
-  })) as Config.InitialOptions;
+  try{
+    return (await configUmiAlias({
+      ...createConfig({
+        target: 'browser',
+        jsTransformer: 'esbuild',
+        // config opts for esbuild , it will pass to esbuild directly
+        jsTransformerOpts: { jsx: 'automatic' },
+      }),
+
+      ${
+        res.willUseTLR ? `setupFilesAfterEnv: ['<rootDir>/jest-setup.ts'],` : ''
+      }
+      collectCoverageFrom: [
+${collectCoverageFrom.map((v) => `        '${v}'`).join(',\n')}
+      ],
+      // if you require some es-module npm package, please uncomment below line and insert your package name
+      // transformIgnorePatterns: ['node_modules/(?!.*(lodash-es|your-es-pkg-name)/)']
+    })) as Config.InitialOptions;
+  } catch (e) {
+    console.log(e);
+    throw e;
+  }
 };
-`.trimLeft(),
+`.trimStart(),
       );
       logger.info('Write jest.config.ts');
 
@@ -84,3 +133,18 @@ export default async () => {
     },
   });
 };
+
+function getJestVersion() {
+  try {
+    const umiPkg = require.resolve('umi/package.json', {
+      paths: [process.cwd()],
+    });
+    const testPkg = require.resolve('@umijs/test/package.json', {
+      paths: [umiPkg],
+    });
+    const version: string = require(testPkg).devDependencies.jest;
+    return semver.minVersion(version)!.version.split('.')[0];
+  } catch {
+    return 29;
+  }
+}

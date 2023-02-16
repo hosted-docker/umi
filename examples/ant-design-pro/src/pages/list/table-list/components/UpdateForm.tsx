@@ -5,7 +5,7 @@ import {
   ProFormText,
   ProFormTextArea,
   StepsForm,
-} from '@ant-design/pro-form';
+} from '@ant-design/pro-components';
 import { Modal } from 'antd';
 import React from 'react';
 import type { TableListItem } from '../data';
@@ -40,7 +40,7 @@ const UpdateForm: React.FC<UpdateFormProps> = (props) => {
             }}
             destroyOnClose
             title="规则配置"
-            visible={props.updateModalVisible}
+            open={props.updateModalVisible}
             footer={submitter}
             onCancel={() => {
               props.onCancel();

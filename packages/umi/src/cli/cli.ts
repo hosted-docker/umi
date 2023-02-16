@@ -1,11 +1,10 @@
-import { logger, printHelp, yParser } from '@umijs/utils';
+import { logger, printHelp, setNoDeprecation, yParser } from '@umijs/utils';
 import { DEV_COMMAND } from '../constants';
 import { Service } from '../service/service';
 import { dev } from './dev';
 import {
   checkLocal,
   checkVersion as checkNodeVersion,
-  setNoDeprecation,
   setNodeTitle,
 } from './node';
 
@@ -27,7 +26,7 @@ export async function run(opts?: IOpts) {
     boolean: ['version'],
   });
   const command = args._[0];
-  if ([DEV_COMMAND, 'setup'].includes(command)) {
+  if ([DEV_COMMAND, 'mfsu', 'setup'].includes(command)) {
     process.env.NODE_ENV = 'development';
   } else if (command === 'build') {
     process.env.NODE_ENV = 'production';

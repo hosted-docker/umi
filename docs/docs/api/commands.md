@@ -1,6 +1,40 @@
 # 命令行
 
-为方便查找，以下命令通过字母排序。
+umi 提供了很多内置的命令行用于启动，构建项目，另外还有一些辅助开发的命令，如生成器等。
+
+要获取可用的命令列表，你可以在项目目录中运行 help 命令：
+
+```bash
+umi help
+```
+
+你应该能看到类似如下的日志：
+
+```bash
+Usage: umi <command> [options]
+
+Commands:
+
+    build     build app for production
+    config    umi config cli
+    dev       dev server for development
+    help      show commands help
+    lint      lint source code using eslint and stylelint
+    setup     setup project
+    version   show umi version
+    v         show umi version
+    plugin    inspect umi plugins
+    verify-commit verify the commit message, which is usually used with husky.
+    preview   locally preview production build
+    run       run the script commands, support for ts and zx
+    generate  generate code snippets quickly
+    g         generate code snippets quickly
+
+Run `umi help <command>` for more information of specific commands.
+Visit https://umijs.org/ to learn more about Umi.
+```
+
+> 为方便查找，以下命令通过字母排序。
 
 ## build
 
@@ -20,7 +54,7 @@ $ umi build
 $ umi config list
  - [key: polyfill] false
  - [key: externals] { esbuild: true }
-  
+
 $ umi config get mfsu
  - [key: externals] { esbuild: true }
 ```
@@ -41,7 +75,13 @@ remove config:polyfill on /private/tmp/sorrycc-wsYpty/.umirc.ts
 
 ```bash
 $ umi dev
-ready - App listening at http://127.0.0.1:8000
+        ╔═════════════════════════════════════════════════════╗
+        ║ App listening at:                                   ║
+        ║  >   Local: https://127.0.0.1:8001                  ║
+ready - ║  > Network: https://192.168.1.1:8001                ║
+        ║                                                     ║
+        ║ Now you can open browser with the above addresses👆 ║
+        ╚═════════════════════════════════════════════════════╝
 event - compiled successfully in 1051 ms (416 modules)
 ```
 
@@ -113,7 +153,7 @@ Details:
 
 ```bash
 $ umi lint
-Usage: umi lint 
+Usage: umi lint
 
  支持只校验 js、ts、tsx、jsx 类型文件： umi lint --eslint-only
 
@@ -167,6 +207,14 @@ $ umi preview --port 9527
 * [mock](../guides/mock)
 
 注意 `dist` 目录会随着配置 `outputPath` 的变更而变更。
+
+## run
+
+`umi run` 命令可以让你像 node 运行 js 一样来运行 TypeScript 和 ESM 文件。你可以搭配 [zx](https://github.com/google/zx) 来更好的使用脚本命令。
+
+```bash
+$ umi run ./script.ts
+```
 
 ## setup
 

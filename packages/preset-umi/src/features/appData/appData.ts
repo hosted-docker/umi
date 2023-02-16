@@ -1,20 +1,22 @@
-import { parseModule } from '@umijs/bundler-utils';
-import { getNpmClient } from '@umijs/utils';
+import { getNpmClient, importLazy } from '@umijs/utils';
 import { existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { parse } from '../../../compiled/ini';
 import { osLocale } from '../../../compiled/os-locale';
 import { expandCSSPaths, expandJSPaths } from '../../commands/dev/watch';
-import { createResolver, scan } from '../../libs/scan';
-import { IApi } from '../../types';
-import { getApiRoutes, getRoutes } from '../tmpFiles/routes';
+import type { IApi, IOnGenerateFiles } from '../../types';
+import { getOverridesCSS } from '../overrides/overrides';
 
 export default (api: IApi) => {
+  const routesApi: typeof import('../tmpFiles/routes') = importLazy(
+    require.resolve('../tmpFiles/routes'),
+  );
+
   api.modifyAppData(async (memo) => {
-    memo.routes = await getRoutes({
+    memo.routes = await routesApi.getRoutes({
       api,
     });
-    memo.apiRoutes = await getApiRoutes({
+    memo.apiRoutes = await routesApi.getApiRoutes({
       api,
     });
     memo.hasSrcDir = api.paths.absSrcPath.endsWith('/src');
@@ -23,6 +25,7 @@ export default (api: IApi) => {
       version: require('../../../package.json').version,
       name: 'Umi',
       importSource: 'umi',
+      cliName: 'umi',
     };
     memo.bundleStatus = {
       done: false,
@@ -44,9 +47,10 @@ export default (api: IApi) => {
     memo.appJS = await getAppJsInfo();
     memo.locale = await osLocale();
     memo.vite = api.config.vite ? {} : undefined;
-    const { globalCSS, globalJS } = getGlobalFiles();
+    const { globalCSS, globalJS, overridesCSS } = getGlobalFiles();
     memo.globalCSS = globalCSS;
     memo.globalJS = globalJS;
+    memo.overridesCSS = overridesCSS;
 
     const gitDir = findGitDir(api.paths.cwd);
     if (gitDir) {
@@ -67,29 +71,25 @@ export default (api: IApi) => {
     return memo;
   });
 
-  function findGitDir(dir: string): string | null {
-    if (dir === resolve('/')) {
-      return null;
-    }
-    if (existsSync(join(dir, '.git'))) {
-      return join(dir, '.git');
-    }
-    const parent: string | null = findGitDir(join(dir, '..'));
-    if (parent) {
-      return parent;
-    }
-    return null;
-  }
+  api.registerMethod({
+    name: '_refreshRoutes',
+    async fn() {
+      api.appData.routes = await routesApi.getRoutes({
+        api,
+      });
+    },
+  });
 
   // Execute earliest, so that other onGenerateFiles can get it
   api.register({
     key: 'onGenerateFiles',
-    async fn(args: any) {
+    async fn(args: IOnGenerateFiles) {
       if (!args.isFirstTime) {
         api.appData.appJS = await getAppJsInfo();
-        const { globalCSS, globalJS } = getGlobalFiles();
+        const { globalCSS, globalJS, overridesCSS } = getGlobalFiles();
         api.appData.globalCSS = globalCSS;
         api.appData.globalJS = globalJS;
+        api.appData.overridesCSS = overridesCSS;
       }
     },
     stage: Number.NEGATIVE_INFINITY,
@@ -99,6 +99,7 @@ export default (api: IApi) => {
   api.register({
     key: 'updateAppDataDeps',
     async fn() {
+      const { createResolver, scan } = await import('../../libs/scan.js');
       const resolver = createResolver({
         alias: api.config.alias,
       });
@@ -124,6 +125,8 @@ export default (api: IApi) => {
   async function getAppJsInfo() {
     for (const path of expandJSPaths(join(api.paths.absSrcPath, 'app'))) {
       if (existsSync(path)) {
+        const { parseModule }: typeof import('@umijs/bundler-utils') =
+          importLazy(require.resolve('@umijs/bundler-utils'));
         const [_, exports] = await parseModule({
           path,
           content: readFileSync(path, 'utf-8'),
@@ -155,9 +158,28 @@ export default (api: IApi) => {
       [],
     );
 
+    const overridesCSS = [getOverridesCSS(api.paths.absSrcPath)].filter(
+      Boolean,
+    ) as string[];
+
     return {
       globalCSS,
       globalJS,
+      overridesCSS,
     };
   }
 };
+
+function findGitDir(dir: string): string | null {
+  if (dir === resolve('/')) {
+    return null;
+  }
+  if (existsSync(join(dir, '.git'))) {
+    return join(dir, '.git');
+  }
+  const parent: string | null = findGitDir(join(dir, '..'));
+  if (parent) {
+    return parent;
+  }
+  return null;
+}

@@ -1,8 +1,8 @@
 {
   "name": "@umijs/max",
-  "version": "4.0.6",
+  "version": "4.0.52",
   "description": "@umijs/max",
-  "homepage": "https://github.com/umijs/umi/tree/master/packages/pro#readme",
+  "homepage": "https://github.com/umijs/umi/tree/master/packages/max#readme",
   "bugs": "https://github.com/umijs/umi/issues",
   "repository": {
     "type": "git",
@@ -15,30 +15,31 @@
     "max": "bin/max.js"
   },
   "files": [
-    "dist",
     "bin",
-    "index.js",
+    "dist",
+    "eslint.js",
     "index.d.ts",
+    "index.js",
     "plugin-utils.d.ts",
     "plugin-utils.js",
     "prettier.js",
+    "stylelint.js",
+    "test-setup.js",
     "test.d.ts",
-    "test.js",
-    "eslint.js",
-    "stylelint.js"
+    "test.js"
   ],
   "scripts": {
-    "build": "pnpm tsc",
+    "build": "umi-scripts father build",
     "build:deps": "umi-scripts bundleDeps",
-    "dev": "pnpm build --watch"
+    "dev": "umi-scripts father dev"
   },
   "dependencies": {
-    "@umijs/lint": "4.0.6",
-    "@umijs/plugins": "4.0.6",
+    "@umijs/lint": "4.0.52",
+    "@umijs/plugins": "4.0.52",
     "antd": "^4.20.6",
-    "eslint": "8.15.0",
+    "eslint": "8.31.0",
     "stylelint": "14.8.2",
-    "umi": "4.0.6"
+    "umi": "4.0.52"
   },
   "publishConfig": {
     "access": "public"

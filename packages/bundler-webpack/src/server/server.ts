@@ -1,10 +1,10 @@
-import { createHttpsServer } from '@umijs/bundler-utils';
+import { createHttpsServer, createProxy } from '@umijs/bundler-utils';
 import express from '@umijs/bundler-utils/compiled/express';
-import { createProxyMiddleware } from '@umijs/bundler-webpack/compiled/http-proxy-middleware';
+import type { Stats } from '@umijs/bundler-webpack/compiled/webpack';
 import webpack, {
   Configuration,
 } from '@umijs/bundler-webpack/compiled/webpack';
-import { chalk, logger } from '@umijs/utils';
+import { getDevBanner, lodash, logger } from '@umijs/utils';
 import cors from 'cors';
 import { createReadStream, existsSync } from 'fs';
 import http from 'http';
@@ -17,18 +17,23 @@ interface IOpts {
   cwd: string;
   port?: number;
   host?: string;
+  ip?: string;
   webpackConfig: Configuration;
   userConfig: IConfig;
   beforeMiddlewares?: any[];
   afterMiddlewares?: any[];
   onDevCompileDone?: Function;
   onProgress?: Function;
+  onBeforeMiddleware?: Function;
 }
 
-export async function createServer(opts: IOpts) {
+export async function createServer(opts: IOpts): Promise<any> {
   const { webpackConfig, userConfig } = opts;
   const { proxy } = userConfig;
   const app = express();
+  // ws 需要提前初始化
+  // 避免在 https 模式下时「Cannot access 'ws' before initialization」的报错
+  let ws: ReturnType<typeof createWebSocketServer>;
 
   // cros
   app.use(
@@ -62,6 +67,11 @@ export async function createServer(opts: IOpts) {
   // before middlewares
   (opts.beforeMiddlewares || []).forEach((m) => app.use(m));
 
+  // Provides the ability to execute custom middleware prior to all other middleware internally within the server.
+  if (opts.onBeforeMiddleware) {
+    opts.onBeforeMiddleware(app);
+  }
+
   // webpack dev middleware
   const configs = Array.isArray(webpackConfig)
     ? webpackConfig
@@ -72,12 +82,14 @@ export async function createServer(opts: IOpts) {
       const progress = {
         percent: 0,
         status: 'waiting',
+        details: [],
       };
       progresses.push(progress);
       config.plugins.push(
-        new webpack.ProgressPlugin((percent, msg) => {
+        new webpack.ProgressPlugin((percent, msg, ...details) => {
           progress.percent = percent;
           progress.status = msg;
+          (progress.details as string[]) = details;
           opts.onProgress!({ progresses });
         }),
       );
@@ -103,7 +115,7 @@ export async function createServer(opts: IOpts) {
     compiler.hooks.invalid.tap('server', () => {
       sendMessage(MESSAGE_TYPE.invalid);
     });
-    compiler.hooks.done.tap('server', (_stats) => {
+    compiler.hooks.done.tap('server', (_stats: Stats) => {
       stats = _stats;
       sendStats(getStats(stats));
       opts.onDevCompileDone?.({
@@ -159,36 +171,20 @@ export async function createServer(opts: IOpts) {
   }
 
   function sendMessage(type: string, data?: any, sender?: any) {
-    (sender || ws).send(JSON.stringify({ type, data }));
+    (sender || ws)?.send(JSON.stringify({ type, data }));
   }
 
-  // mock
   // proxy
   if (proxy) {
-    Object.keys(proxy).forEach((key) => {
-      const proxyConfig = proxy[key];
-      const target = proxyConfig.target;
-      if (target) {
-        app.use(
-          key,
-          createProxyMiddleware(key, {
-            ...proxy[key],
-            // Add x-real-url in response header
-            onProxyRes(proxyRes, req: any, res) {
-              proxyRes.headers['x-real-url'] =
-                new URL(req.url || '', target as string)?.href || '';
-              proxyConfig.onProxyRes?.(proxyRes, req, res);
-            },
-          }),
-        );
-      }
-    });
+    createProxy(proxy, app);
   }
+
   // after middlewares
   (opts.afterMiddlewares || []).forEach((m) => {
     // TODO: FIXME
     app.use(m.toString().includes(`{ compiler }`) ? m({ compiler }) : m);
   });
+
   // history fallback
   app.use(
     require('@umijs/bundler-webpack/compiled/connect-history-api-fallback')({
@@ -213,14 +209,30 @@ export async function createServer(opts: IOpts) {
     }
   });
 
-  const server = userConfig.https
-    ? await createHttpsServer(app, userConfig.https)
-    : http.createServer(app);
+  let server: http.Server | Awaited<ReturnType<typeof createHttpsServer>>;
+  if (userConfig.https) {
+    const httpsOpts = userConfig.https;
+    if (!httpsOpts.hosts) {
+      httpsOpts.hosts = lodash.uniq(
+        [
+          ...(httpsOpts.hosts || []),
+          // always add localhost, 127.0.0.1, ip and host
+          '127.0.0.1',
+          'localhost',
+          opts.ip,
+          opts.host !== '0.0.0.0' && opts.host,
+        ].filter(Boolean) as string[],
+      );
+    }
+    server = await createHttpsServer(app, httpsOpts);
+  } else {
+    server = http.createServer(app);
+  }
   if (!server) {
     return null;
   }
 
-  const ws = createWebSocketServer(server);
+  ws = createWebSocketServer(server);
 
   ws.wss.on('connection', (socket) => {
     if (stats) {
@@ -232,10 +244,11 @@ export async function createServer(opts: IOpts) {
   const port = opts.port || 8000;
 
   server.listen(port, () => {
-    const host = opts.host && opts.host !== '0.0.0.0' ? opts.host : 'localhost';
-    logger.ready(
-      `App listening at ${chalk.green(`${protocol}//${host}:${port}`)}`,
-    );
+    const banner = getDevBanner(protocol, opts.host, port);
+
+    console.log(banner.before);
+    logger.ready(banner.main);
+    console.log(banner.after);
   });
 
   return server;

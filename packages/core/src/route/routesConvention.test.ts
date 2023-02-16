@@ -23,6 +23,13 @@ test('normal', () => {
       file: 'b.ts',
       absPath: '/b',
     },
+    'b/index': {
+      path: '',
+      id: 'b/index',
+      parentId: 'b',
+      file: 'b/index.ts',
+      absPath: '/b/',
+    },
     'b/c': {
       path: 'c',
       id: 'b/c',
@@ -30,12 +37,26 @@ test('normal', () => {
       file: 'b/c.ts',
       absPath: '/b/c',
     },
+    'c/$index': {
+      absPath: '/c/:index',
+      file: 'c/$index.ts',
+      id: 'c/$index',
+      parentId: undefined,
+      path: 'c/:index',
+    },
     d: {
       path: 'd',
       id: 'd',
       parentId: undefined,
       file: 'd.ts',
       absPath: '/d',
+    },
+    'e/index': {
+      path: 'e',
+      id: 'e/index',
+      parentId: undefined,
+      file: 'e/index.ts',
+      absPath: '/e',
     },
     'index/index': {
       absPath: '/',
@@ -51,22 +72,30 @@ test('exclude', () => {
   expect(
     getConventionRoutes({
       base: join(fixtures, 'convention-a/pages'),
-      exclude: [/b\.(j|t)sx?$/, /b\//],
+      // only index or 404 file
+      exclude: [/(?<!(index|\[index\]|404)(\.(js|jsx|ts|tsx)))$/],
     }),
   ).toEqual({
-    a: {
-      path: 'a',
-      id: 'a',
+    'b/index': {
+      path: 'b',
+      id: 'b/index',
       parentId: undefined,
-      file: 'a.ts',
-      absPath: '/a',
+      file: 'b/index.ts',
+      absPath: '/b',
     },
-    d: {
-      path: 'd',
-      id: 'd',
+    'c/$index': {
+      absPath: '/c/:index',
+      file: 'c/$index.ts',
+      id: 'c/$index',
       parentId: undefined,
-      file: 'd.ts',
-      absPath: '/d',
+      path: 'c/:index',
+    },
+    'e/index': {
+      path: 'e',
+      id: 'e/index',
+      parentId: undefined,
+      file: 'e/index.ts',
+      absPath: '/e',
     },
     'index/index': {
       absPath: '/',

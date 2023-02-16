@@ -1,8 +1,9 @@
-import type { Config as SwcConfig } from '@swc/core';
-import type { HttpsServerOptions } from '@umijs/bundler-utils';
-import type { Options as ProxyOptions } from '../compiled/http-proxy-middleware';
-import { Configuration } from '../compiled/webpack';
+import type { Options as SwcConfig } from '@swc/core';
+import type { HttpsServerOptions, ProxyOptions } from '@umijs/bundler-utils';
+import webpack, { Configuration } from '../compiled/webpack';
 import Config from '../compiled/webpack-5-chain';
+import type { TransformOptions as EsbuildOptions } from '@umijs/bundler-utils/compiled/esbuild';
+import type { BundleAnalyzerPlugin } from 'webpack-bundle-analyzer';
 
 export enum Env {
   development = 'development',
@@ -37,7 +38,11 @@ export interface ICopy {
 }
 
 type WebpackConfig = Required<Configuration>;
-type IBabelPlugin = Function | string | [string, { [key: string]: any }];
+type IBabelPlugin =
+  | Function
+  | string
+  | [string, { [key: string]: any }]
+  | [string, { [key: string]: any }, string];
 
 export interface DeadCodeParams {
   patterns?: string[];
@@ -52,14 +57,22 @@ export interface IConfig {
   alias?: Record<string, string>;
   autoCSSModules?: boolean;
   base?: string;
-  chainWebpack?: Function;
+  chainWebpack?: {
+    (
+      memo: Config,
+      args: {
+        env: keyof typeof Env;
+        webpack: typeof webpack;
+      },
+    ): void;
+  };
   copy?: ICopy[] | string[];
   cssLoader?: { [key: string]: any };
   cssLoaderModules?: { [key: string]: any };
-  cssMinifier?: CSSMinifier;
+  cssMinifier?: `${CSSMinifier}`;
   cssMinifierOptions?: { [key: string]: any };
   define?: { [key: string]: any };
-  depTranspiler?: Transpiler;
+  depTranspiler?: `${Transpiler}`;
   devtool?: Config.DevTool;
   deadCode?: DeadCodeParams;
   https?: HttpsServerOptions;
@@ -67,29 +80,43 @@ export interface IConfig {
   esm?: { [key: string]: any };
   extraBabelPlugins?: IBabelPlugin[];
   extraBabelPresets?: IBabelPlugin[];
-  extraBabelIncludes?: string[];
+  extraBabelIncludes?: Array<string | RegExp>;
   extraPostCSSPlugins?: any[];
   hash?: boolean;
   ignoreMomentLocale?: boolean;
-  jsMinifier?: JSMinifier;
+  jsMinifier?: `${JSMinifier}`;
   jsMinifierOptions?: { [key: string]: any };
   lessLoader?: { [key: string]: any };
   outputPath?: string;
   postcssLoader?: { [key: string]: any };
-  proxy?: { [key: string]: ProxyOptions };
+  proxy?: { [key: string]: ProxyOptions } | ProxyOptions[];
   publicPath?: string;
   purgeCSS?: { [key: string]: any };
   sassLoader?: { [key: string]: any };
-  srcTranspiler?: Transpiler;
+  srcTranspiler?: `${Transpiler}`;
+  srcTranspilerOptions?: ISrcTranspilerOpts;
   styleLoader?: { [key: string]: any };
   svgr?: { [key: string]: any };
   svgo?: { [key: string]: any } | false;
   targets?: { [key: string]: any };
   writeToDisk?: boolean;
+  babelLoaderCustomize?: string;
+  analyze?: BundleAnalyzerPlugin.Options;
   [key: string]: any;
 }
 
-export interface SwcOptions extends SwcConfig {
+export interface ISrcTranspilerOpts {
+  swc?: Partial<SwcConfig>;
+  esbuild?: Partial<EsbuildOptions>;
+}
+
+export interface ISwcPluginOpts {
+  enableAutoCssModulesPlugin?: boolean;
+}
+
+export interface SwcOptions extends SwcConfig, ISwcPluginOpts {
   sync?: boolean;
   parseMap?: boolean;
+  excludeFiles?: Array<string | RegExp>;
+  mergeConfigs?: Partial<SwcConfig>;
 }

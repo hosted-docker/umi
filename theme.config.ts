@@ -1,4 +1,3 @@
-// @ts-ignore
 import UmiLogo from './packages/plugin-docs/client/theme-doc/icons/umi.png';
 
 export default {
@@ -19,20 +18,11 @@ export default {
       path: '/docs',
       title: 'Docs',
       type: 'nav',
+      link: '/docs/introduce/introduce',
       children: [
         {
           title: 'Tutorials',
-          children: ['tutorials/getting-started', 'tutorials/blog'],
-        },
-        {
-          title: 'API',
-          children: [
-            'api/api',
-            'api/config',
-            'api/runtime-config',
-            'api/commands',
-            'api/plugin-api',
-          ],
+          children: ['tutorials/getting-started'],
         },
         {
           title: 'Introduce',
@@ -41,6 +31,7 @@ export default {
             'introduce/philosophy',
             'introduce/contributing',
             'introduce/upgrade-to-umi-4',
+            'introduce/faq',
           ],
         },
         {
@@ -49,6 +40,7 @@ export default {
             'guides/prepare',
             'guides/directory-structure',
             'guides/routes',
+            'guides/use-plugins',
             // 'guides/api-routes',
             'guides/mock',
             'guides/proxy',
@@ -71,6 +63,17 @@ export default {
             'guides/test',
             'guides/plugins',
             'guides/use-vue',
+            'guides/mpa',
+          ],
+        },
+        {
+          title: 'API',
+          children: [
+            'api/api',
+            'api/config',
+            'api/runtime-config',
+            'api/commands',
+            'api/plugin-api',
           ],
         },
         {
@@ -85,9 +88,16 @@ export default {
             'max/access',
             'max/i18n',
             'max/micro-frontend',
+            'max/styled-components',
+            'max/react-query',
+            'max/valtio',
             'max/dva',
-            // 暂不支持
-            // 'max/bacon',
+            'max/analytics',
+            // TODO: tailwind 功能需要修订
+            // 'max/tailwindcss',
+            // 暂不放出
+            // 'max/mf'
+            // 'max/moment2dayjs',
           ],
         },
       ],
@@ -96,13 +106,18 @@ export default {
       path: '/blog',
       title: 'Blog',
       type: 'nav',
+      link: '/blog/umi-4-rc',
       children: [
         {
           title: 'Blog',
           children: [
+            'develop-blog-using-umi',
             'umi-4-rc',
             'mfsu-faster-than-vite',
             'mfsu-independent-usage',
+            'code-splitting',
+            'legacy-browser',
+            'webpack-5-prod-cache',
           ],
         },
       ],

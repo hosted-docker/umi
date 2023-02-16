@@ -1,4 +1,3 @@
-import { lodash } from '@umijs/utils';
 import type { DepModule } from './depInfo';
 
 class ModuleNode {
@@ -34,13 +33,22 @@ export class ModuleGraph {
     depModules: any;
     depSnapshotModules: any;
   }) {
-    let fileMap = new Map<string, boolean>();
-    const addNode = ({ file, importer }: any) => {
-      // fix circular dependency
-      if (fileMap.has(file)) return;
-      fileMap.set(file, true);
+    const getModuleNode = (file: string) => {
+      if (this.fileToModules.has(file)) {
+        return this.fileToModules.get(file)!;
+      }
+      if (this.depToModules.has(file)) {
+        return this.depToModules.get(file)!;
+      }
 
       const mod = new ModuleNode(file);
+
+      return mod;
+    };
+
+    const addNode = ({ file, importer }: any) => {
+      const mod = getModuleNode(file);
+
       let isDependency = false;
       let info;
       if (data.fileModules[file]) {
@@ -52,7 +60,12 @@ export class ModuleGraph {
       if (info.isRoot) mod.isRoot = true;
       if (importer) {
         mod.importers.add(importer);
-        importer.importedModules.add(mod);
+
+        if (!importer.importedModules.has(mod)) {
+          importer.importedModules.add(mod);
+        } else {
+          return;
+        }
       }
       mod.isDependency = isDependency;
       if (info.version !== undefined) {
@@ -61,10 +74,10 @@ export class ModuleGraph {
       if (isDependency) {
         this.depToModules.set(file, mod);
       } else {
+        this.fileToModules.set(file, mod);
         for (const importedModule of info.importedModules) {
           addNode({ file: importedModule, importer: mod });
         }
-        this.fileToModules.set(file, mod);
       }
     };
     for (const root of data.roots) {
@@ -119,15 +132,38 @@ export class ModuleGraph {
   }
 
   getDepInfo(mod: ModuleNode) {
+    const [importer] = mod.importers;
+
     return {
       file: mod.file,
       version: mod.version!,
+      importer: importer?.file,
     };
   }
 
   hasDepChanged() {
     const depModulesInfo = this.getDepsInfo(this.depToModules);
-    return !lodash.isEqual(depModulesInfo, this.depSnapshotModules);
+
+    const depKeys = Object.keys(depModulesInfo);
+    const snapshotKeys = Object.keys(this.depSnapshotModules);
+
+    if (depKeys.length !== snapshotKeys.length) {
+      return true;
+    }
+
+    for (const k of depKeys) {
+      const dep = depModulesInfo[k];
+      const snapshot = this.depSnapshotModules[k];
+      if (dep.file !== snapshot?.file) {
+        return true;
+      }
+
+      if (dep.version !== snapshot?.version) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   onFileChange(opts: { file: string; deps: IDep[] }) {

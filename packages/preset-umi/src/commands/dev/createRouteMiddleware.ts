@@ -34,9 +34,12 @@ function createRouteMiddleware(opts: { api: IApi }) {
 
       const requestHandler = await createRequestHandler({
         ...markupArgs,
-        // css will be injected with style tag in vite mode
-        styles: (assetsMap['umi.css'] || []).concat(markupArgs.styles),
-        scripts: (assetsMap['umi.js'] || []).concat(markupArgs.scripts!),
+        styles: markupArgs.styles.concat(
+          (assetsMap['umi.css'] || []).map((src) => ({ src })),
+        ),
+        scripts: (assetsMap['umi.js'] || [])
+          .map((src) => ({ src }))
+          .concat(markupArgs.scripts!),
         esmScript: false,
         historyType: opts.api.config.history?.type || 'browser',
       });

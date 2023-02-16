@@ -1,3 +1,5 @@
+import { Message } from 'umi';
+
 # 样式
 
 本文介绍各种在 Umi 项目中使用样式的方式。
@@ -14,10 +16,10 @@
 }
 ```
 
-然后在 `src/pages/index.js` 文件中引入即可生效。
+然后在 `src/pages/index.tsx` 文件中引入即可生效。
 
 ```jsx
-// src/pages/index.js
+// src/pages/index.tsx
 
 import './index.css';
 
@@ -34,7 +36,7 @@ export default function () {
 在 `js` 文件中引入样式时，如果赋予他一个变量名，就可以将样式以 CSS Module 的形式引入。
 
 ```jsx
-// src/pages/index.js
+// src/pages/index.tsx
 
 import styles from './index.css';
 
@@ -49,10 +51,14 @@ export default function () {
 
 ## 使用 CSS 预处理器
 
-Umi 默认支持 LESS (推荐), SASS 和 SCSS 样式的导入，你可以直接按照引入 CSS 文件的方式引入并使用这些由 CSS 预处理器处理的样式。
+Umi 默认支持 LESS (推荐)，SASS 和 SCSS 样式的导入，你可以直接按照引入 CSS 文件的方式引入并使用这些由 CSS 预处理器处理的样式。
+
+<Message emoji="💡" >
+在 Umi 中使用 Sass(Scss) 需要额外安装预处理依赖 如: `npm add -D sass`
+</Message>
 
 ```jsx
-// src/pages/index.js
+// src/pages/index.tsx
 
 import './index.less';
 import './index.sass';
@@ -66,7 +72,7 @@ export default function () {
 同样也支持 CSS Module 的用法：
 
 ```jsx
-// src/pages/index.js
+// src/pages/index.tsx
 
 import lessStyles from './index.less';
 import sassStyles from './index.sass';
@@ -105,14 +111,15 @@ pnpm i unocss @unocss/cli
 3. 在 Umi 设置中启用插件，并声明会用到 `unocss` 的文件目录
 
 ```js
-// .umirc.ts 或 config/config.ts
+// .umirc.ts
 
 export default {
   plugins: [
     require.resolve('@umijs/plugins/dist/unocss')
   ],
   unocss: {
-    watch: ['pages/**/*.tsx'] // 添加其他包含 unocss 的 classname 的文件目录
+    // 检测 className 的文件范围，若项目不包含 src 目录，可使用 `pages/**/*.tsx`
+    watch: ['src/**/*.tsx']
   },
 };
 ```

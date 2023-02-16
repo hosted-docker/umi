@@ -1,9 +1,8 @@
 import * as Babel from '@umijs/bundler-utils/compiled/babel/core';
-import { isLocalDev, winPath } from '@umijs/utils';
+import { isLocalDev, winPath, aliasUtils } from '@umijs/utils';
 import assert from 'assert';
 import { isAbsolute, join } from 'path';
 import type { IOpts } from './awaitImport';
-import { getAliasedPath } from './getAliasedPath';
 import { isExternals } from './isExternals';
 
 // const UNMATCH_LIBS = ['umi', 'dumi', '@alipay/bigfish'];
@@ -14,6 +13,21 @@ function isUmiLocalDev(path: string) {
   return rootPath
     ? winPath(path).startsWith(winPath(join(rootPath, './packages')))
     : false;
+}
+
+function genUnMatchLibsRegex(libs?: Array<string | RegExp>) {
+  if (!libs) {
+    return null;
+  }
+
+  const deps = libs.map((lib) => {
+    if (typeof lib === 'string') {
+      return `^${lib}$`;
+    } else if (lib instanceof RegExp) {
+      return lib.source;
+    }
+  });
+  return deps.length ? new RegExp(deps.join('|')) : null;
 }
 
 export function checkMatch({
@@ -47,13 +61,15 @@ export function checkMatch({
   // FIXME: hard code for vite mode
   value = value.replace(/^@fs\//, '/');
 
+  const unMatchLibsRegex = genUnMatchLibsRegex(opts.unMatchLibs);
+
+  const mfPathInitial = `${remoteName}/`;
+
   if (
     // unMatch specified libs
-    opts.unMatchLibs?.includes(value) ||
+    unMatchLibsRegex?.test(value) ||
     // do not match bundler-webpack/client/client/client.js
     value.includes('client/client/client.js') ||
-    // already handled
-    value.startsWith(`${remoteName}/`) ||
     // don't match dynamic path
     // e.g. @umijs/deps/compiled/babel/svgr-webpack.js?-svgo,+titleProp,+ref!./umi.svg
     winPath(value).includes('babel/svgr-webpack') ||
@@ -66,11 +82,14 @@ export function checkMatch({
     value.startsWith('.')
   ) {
     isMatch = false;
+    // already handled
+  } else if (value.startsWith(mfPathInitial)) {
+    isMatch = true;
   } else if (isAbsolute(value)) {
     isMatch = RE_NODE_MODULES.test(value) || isUmiLocalDev(value);
   } else {
-    const aliasedPath = getAliasedPath({
-      value,
+    const aliasedPath = aliasUtils.getAliasValue({
+      imported: value,
       alias: opts.alias || {},
     });
     if (aliasedPath) {
@@ -93,7 +112,13 @@ export function checkMatch({
   }
 
   if (isMatch) {
-    replaceValue = `${remoteName}/${winPath(value)}`;
+    // in case src file compiled twice or more
+    if (value.startsWith(mfPathInitial)) {
+      replaceValue = value;
+      value = value.replace(mfPathInitial, '');
+    } else {
+      replaceValue = `${remoteName}/${winPath(value)}`;
+    }
   }
 
   // @ts-ignore

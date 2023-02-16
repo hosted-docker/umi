@@ -1,5 +1,5 @@
 import esbuild from '@umijs/bundler-utils/compiled/esbuild';
-import { logger } from '@umijs/utils';
+import { aliasUtils, isMonorepo, logger } from '@umijs/utils';
 import { resolve } from 'path';
 import { IApi } from '../../../types';
 import { absServerBuildPath, esbuildUmiPlugin } from '../utils';
@@ -13,9 +13,22 @@ export async function build(opts: { api: IApi; watch?: boolean }) {
   logger.wait('[SSR] Compiling...');
   const now = new Date().getTime();
 
-  // TODO: 支持通用的 alias
-  // TODO: external all import from package.json.dependencies
+  function getExternal() {
+    // TODO: 先不考虑 monorepo 的场景，因为可能依赖了其他的子包
+    if (isMonorepo({ root: api.paths.cwd })) {
+      return [];
+    } else {
+      const dependencies = Object.keys(api.pkg.dependencies || {});
+      const devDependencies = Object.keys(api.pkg.devDependencies || {});
+      return [...dependencies, ...devDependencies];
+    }
+  }
+
+  // currently esbuild not support circle alias
+  const alias = aliasUtils.parseCircleAlias({ alias: api.config.alias });
+
   await esbuild.build({
+    alias,
     format: 'cjs',
     platform: 'node',
     target: 'esnext',
@@ -43,6 +56,7 @@ export async function build(opts: { api: IApi; watch?: boolean }) {
       assetsLoader({ cwd: api.cwd }),
     ],
     outfile: absServerBuildPath(api),
+    external: getExternal(),
   });
   const diff = new Date().getTime() - now;
   logger.info(`[SSR] Compiled in ${diff}ms`);
@@ -57,7 +71,10 @@ export const loader: { [ext: string]: esbuild.Loader } = {
   '.eot': 'file',
   '.flac': 'file',
   '.gif': 'file',
+  '.htm': 'file',
+  '.html': 'file',
   '.ico': 'file',
+  '.icon': 'file',
   '.jpeg': 'file',
   '.jpg': 'file',
   '.js': 'jsx',

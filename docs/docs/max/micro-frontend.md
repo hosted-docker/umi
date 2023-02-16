@@ -139,14 +139,15 @@ export default {
           routes: [
             // 配置微应用 app1 关联的路由
             {
-              path: '/app1/project',
+              // 带上 * 通配符意味着将 /app1/project 下所有子路由都关联给微应用 app1
+              path: '/app1/project/*',
               microApp: 'app1',
             },
           ],
         },
         // 配置 app2 关联的路由
         {
-          path: '/app2',
+          path: '/app2/*',
           microApp: 'app2',
         },
       ],
@@ -235,6 +236,50 @@ export default () => {
 
 当您需要在子应用当中嵌套孙子应用时，使用该组件是一个不错的选择。
 
+
+### 子应用之间跳转
+
+#### 使用 `<MicroAppLink />` 组件跳转
+
+通过路由绑定引入的子应用，可以使用 `<MicroAppLink />` 进行跨子应用的跳转。以上述 app1 和 app2 为例
+
+```tsx
+// 在 app1 中
+import { MicroAppLink } from 'umi';
+
+export default () => {
+  return (
+    <div>
+      {/* 跳转链接为 /app2/home */}
+      <MicroAppLink name="app2" to="/home">
+        <Button>go to app2</Button>
+      </MicroAppLink>
+    </div>
+  );
+}
+
+```
+
+```tsx
+// 在 app2 中
+import { MicroAppLink } from 'umi';
+
+export default () => {
+  return (
+    <div>
+    {/* 跳转链接为 /app1/project/hello */}
+      <MicroAppLink name="app1" to="/hello"> 
+        <Button>go to app1</Button>
+      </MicroAppLink>
+      {/* 跳转链接为 /table */}
+      <MicroAppLink to="/table" isMaster>go to maser app</MicroAppLink>
+    </div>
+  );
+}
+
+```
+
+
 ## 子应用生命周期
 
 Qiankun 在 single-spa 的基础上实现了一些额外的生命钩子。按照微应用的生命周期顺序，Qiankun 支持的完整的生命钩子列表如下：
@@ -290,14 +335,22 @@ export const qiankun = {
 
 ### 子应用配置生命周期钩子
 
-在子应用的 `src/app.ts` 中导出 `qiankun` 对象，实现生命周期钩子：
+在子应用的 `src/app.ts` 中导出 `qiankun` 对象，实现生命周期钩子。子应用运行时仅支持配置 bootstrap、mount、unmount 钩子：
 
 ```ts
 // src/app.ts
 export const qiankun = {
-  // 子应用在挂载完成时，打印 props 信息
-  async afterMount(props) {
-    console.log(props);
+  // 应用加载之前
+  async bootstrap(props) {
+    console.log('app1 bootstrap', props);
+  },
+  // 应用 render 之前触发
+  async mount(props) {
+    console.log('app1 mount', props);
+  },
+  // 应用卸载之后触发
+  async unmount(props) {
+    console.log('app1 unmount', props);
   },
 };
 ```
@@ -637,6 +690,8 @@ export default {
   },
 };
 ```
+
+
 
 ## API
 

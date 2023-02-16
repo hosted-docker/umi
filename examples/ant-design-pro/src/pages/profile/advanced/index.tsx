@@ -9,7 +9,7 @@ import {
   GridContent,
   PageContainer,
   RouteContext,
-} from '@ant-design/pro-layout';
+} from '@ant-design/pro-components';
 import {
   Badge,
   Button,
@@ -223,8 +223,9 @@ const Advanced: FC = () => {
     operationKey: 'tab1',
     tabActiveKey: 'detail',
   });
-  const { data = {}, loading } =
-    useRequest<{ data: AdvancedProfileData }>(queryAdvancedProfile);
+  const { data = {}, loading } = useRequest<{ data: AdvancedProfileData }>(
+    queryAdvancedProfile,
+  );
   const { advancedOperation1, advancedOperation2, advancedOperation3 } = data;
   const contentList = {
     tab1: (

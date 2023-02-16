@@ -1,8 +1,10 @@
 # 插件 API
 
-为方便查找，以下内容通过字母排序。
+Umi 的核心就在于它的插件机制。基于 Umi 的插件机制，你可以获得扩展项目的编译时和运行时的能力。以下罗列出我们为你提供的所有的插件API，以帮助你能自由编写插件。
 
 在查用 Umi 插件 API 之前，我们建议你先阅读[插件](../guides/plugins)一节，以了解 umi 插件的机制及原理，这将帮助你更好的使用插件 API。
+
+> 为方便查找，以下内容通过字母排序。
 
 ## 核心 API
 service 和 PluginAPI 里定义的方法。
@@ -21,7 +23,7 @@ api.describe({ key?:string, config?: { default , schema, onChange }, enableBy? }
 
 - `key` 是配置中该插件配置的键名
 - `config.default` 是插件配置的默认值，当用户没有在配置中配置 key 时，默认配置将生效。
-- `config.schema` 用于声明配置的类型，基于 [joi](https://hapi.dev/family/joi/) 。 **如果你希望用户进行配置，这个是必须的** ，否则用户的配置无效
+- `config.schema` 用于声明配置的类型，基于 [joi](https://joi.dev/) 。 **如果你希望用户进行配置，这个是必须的** ，否则用户的配置无效
 - `config.onChange` 是 dev 模式下，配置被修改后的处理机制。默认值为 `api.ConfigChangeType.reload`，表示在 dev 模式下，配置项被修改时会重启 dev 进程。 你也可以修改为 `api.ConfigChangeType.regenerateTmpFiles`, 表示只重新生成临时文件。你还可以传入一个方法，来自定义处理机制。
 - `enableBy` 是插件的启用方式，默认是`api.EnableBy.register`，表示注册启用，即插件只要被注册就会被启用。可以更改为 `api.EnableBy.config` ，表示配置启用，只有配置插件的配置项才启用插件。你还可以自定义一个返回布尔值的方法（ true 为启用 ）来决定其启用时机，这通常用来实现动态生效。
 
@@ -272,13 +274,13 @@ api.addBeforeMiddlewares(() => {
 ```
 
 ### addEntryCode
-在入口文档的最后面添加代码（render 后）。传入的 fn 不需要参数，且需要返回一个 string 或者 string 数组。
+在入口文件的最后面添加代码（render 后）。传入的 fn 不需要参数，且需要返回一个 string 或者 string 数组。
 ```ts
 api.addEntryCode(() => `console.log('I am after render!)`);
 ```
 
 ### addEntryCodeAhead
-在入口文档的最前面添加代码（render 前，import 后）。传入的 fn 不需要参数，且需要返回一个 string 或者 string 数组。
+在入口文件的最前面添加代码（render 前，import 后）。传入的 fn 不需要参数，且需要返回一个 string 或者 string 数组。
 ```ts
 api.addEntryCodeAhead(() => `console.log('I am before render!')`)
 ```
@@ -337,7 +339,7 @@ api.addHTMLHeadScripts(() => `console.log('I am in HTML-head')`)
 ```ts
 {
   content?: string,
-  httpEquiv?: string,
+  'http-equiv'?: string,
   name?: string,
   scheme?: string  
 }
@@ -359,6 +361,8 @@ api.addHTMLHeadScripts(() => `console.log('I am in HTML-head')`)
 ### addPolyfillImports
 添加补丁 import，在整个应用的最前面执行。 传入的 fn 不需要参数，返回 `{ source: string, specifier?:string }`
 
+### addPrepareBuildPlugins
+
 ### addRuntimePlugin
 添加运行时插件，传入的 fn 不需要参数，返回 string ，表示插件的路径。
 
@@ -367,6 +371,13 @@ api.addHTMLHeadScripts(() => `console.log('I am in HTML-head')`)
 
 ### addTmpGenerateWatcherPaths
 添加监听路径，变更时会重新生成临时文件。传入的 fn 不需要参数，返回 string，表示要监听的路径。
+
+### addOnDemandDeps
+添加按需安装的依赖，他们会在项目启动时检测是否安装：
+
+```ts
+  api.addOnDemandDeps(() => [{ name: '@swc/core', version: '^1.0.0', dev: true }])
+```
 
 ### chainWebpack
 通过 [webpack-chain](https://github.com/neutrinojs/webpack-chain) 的方式修改 webpack 配置。传入一个fn，该 fn 不需要返回值。它将接收两个参数：
@@ -488,6 +499,17 @@ api.modifyWebpackConfig((memo, { webpack, env }) => {
 ### onBeforeCompiler
 generate 之后，webpack / vite compiler 之前。传入的 fn 不接收任何参数。
 
+### onBeforeMiddleware
+提供在服务器内部执行所有其他中间件之前执行自定义中间件的能力, 这可以用来定义自定义处理程序， 例如:
+
+```ts
+api.onBeforeMiddleware(({ app }) => {
+  app.get('/some/path', function (req, res) {
+    res.json({ custom: 'response' });
+  });
+});
+```
+
 ### onBuildComplete
 build 完成时。传入的 fn 接收 `{ isFirstCompile: boolean, stats, time: number, err?: Error }` 作为参数。
 
@@ -545,12 +567,29 @@ args: {
 }
 ```
 
+
+### onPatchRoute
+匹配单个路由，可以修改路由，给路由打补丁
+
+
 ### onPkgJSONChanged
 package.json 变更时。传入的 fn 接收 `{origin?, current}` 作为参数。它们的类型都是 package.json 对象
 
+### onPrepareBuildSuccess
 
 ### onStart
 启动时。传入的 fn 不接收任何参数。
+
+
+### writeTmpFile
+`api.writeTmpFile()`的 type 参数的类型。
+
+- content: 写入的文本内容，有内容就不会使用模板。
+- context: 模板上下文。
+- noPluginDir: 是否使用插件名做为目录。
+- path: 写入文件的路径。
+- tpl: 使用模板字符串，没有模板路径会使用它。
+- tplPath: 使用模板文件的路径。
 
 
 ## 属性
@@ -579,10 +618,10 @@ e.g.
 
 ```ts
 api.logger.profile('barId');
-setTimeout(()=>{
+setTimeout(() => {
   api.logger.profile('barId');
 })
-// => [PROFILE] Completed in *ms;
+// profile - barId Completed in 6254ms
 ```
 
 ### name

@@ -54,7 +54,7 @@ export default function createHandle(importOptions: {
         retMatched.push({
           isMatch: true,
           value: unAliasedModulePath,
-          replaceValue: `${mfName}/${unAliasedModulePath}`,
+          replaceValue: `${mfName}/${winPath(unAliasedModulePath)}`,
           version,
         });
 
@@ -65,7 +65,7 @@ export default function createHandle(importOptions: {
         retMatched.push({
           isMatch: true,
           value: unAliasedStylePath,
-          replaceValue: `${mfName}/${unAliasedStylePath}`,
+          replaceValue: `${mfName}/${winPath(unAliasedStylePath)}`,
           version,
         });
       }
@@ -120,12 +120,12 @@ function transCamel(_str: string, symbol: string): string {
 
 function errorLogForSpaceImport(libraryName: string) {
   logger.error(
-    `"import * as ant from 'antd'" or "export * from '${libraryName}'" are not allowed in mfsu#version=v4`,
+    `"import * as ant from 'antd'" or "export * from '${libraryName}'" are not allowed in mfsu#strategy='eager'`,
   );
   logger.error(`solutions:`);
   logger.error(`  change to "import { Xxx } from '${libraryName}'" or`);
   logger.error(`            "export { Xxx } from '${libraryName}'" syntax`);
-  logger.error(`  or use mfsu#version=v3 configuration`);
+  logger.error(`  or use mfsu#strategy='normal' configuration`);
 
   throw Error(`"import * as ant from 'antd'" not allowed in mfsu#version=4`);
 }

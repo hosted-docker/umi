@@ -1,18 +1,20 @@
 import { dirname } from 'path';
-import { IApi } from 'umi';
+import { IApi, RUNTIME_TYPE_FILE_NAME } from 'umi';
 import { Mustache, winPath } from 'umi/plugin-utils';
 
 export default (api: IApi) => {
   api.describe({
     key: 'request',
     config: {
-      schema: (joi) => {
-        return joi.object({
-          dataField: joi
-            .string()
-            .pattern(/^[a-zA-Z]*$/)
-            .allow(''),
-        });
+      schema: (Joi) => {
+        return Joi.alternatives().try(
+          Joi.object({
+            dataField: Joi.string()
+              .pattern(/^[a-zA-Z]*$/)
+              .allow(''),
+          }),
+          Joi.boolean().invalid(true),
+        );
       },
     },
     enableBy: api.EnableBy.config,
@@ -48,7 +50,7 @@ import {
   PaginatedResult,
 } from '{{{umiRequestPath}}}/es/types';
 
-type ResultWithData< T = any > = { data?: T; [key: string]: any };
+type ResultWithData< T = any > = { {{resultDataType}} [key: string]: any };
 
 function useRequest<
   R = any,
@@ -61,8 +63,8 @@ function useRequest<
 ): BaseResult<U, P>;
 function useRequest<R extends ResultWithData = any, P extends any[] = any>(
   service: CombineService<R, P>,
-  options?: BaseOptions<R['data'], P>,
-): BaseResult<R['data'], P>;
+  options?: BaseOptions<R{{{resultDataField}}}, P>,
+): BaseResult<R{{{resultDataField}}}, P>;
 function useRequest<R extends LoadMoreFormatReturn = any, RR = any>(
   service: CombineService<RR, LoadMoreParams<R>>,
   options: LoadMoreOptionsWithFormat<R, RR>,
@@ -71,9 +73,9 @@ function useRequest<
   R extends ResultWithData<LoadMoreFormatReturn | any> = any,
   RR extends R = any,
 >(
-  service: CombineService<R, LoadMoreParams<R['data']>>,
-  options: LoadMoreOptions<RR['data']>,
-): LoadMoreResult<R['data']>;
+  service: CombineService<R, LoadMoreParams<R{{{resultDataField}}}>>,
+  options: LoadMoreOptions<RR{{{resultDataField}}}>,
+): LoadMoreResult<R{{{resultDataField}}}>;
 
 function useRequest<R = any, Item = any, U extends Item = any>(
   service: CombineService<R, PaginatedParams>,
@@ -133,7 +135,7 @@ interface IErrorHandler {
 }
 type IRequestInterceptorAxios = (config: RequestOptions) => RequestOptions;
 type IRequestInterceptorUmiRequest = (url: string, config : RequestOptions) => { url: string, options: RequestOptions };
-type IRequestInterceptor = IRequestInterceptorAxios;
+type IRequestInterceptor = IRequestInterceptorAxios | IRequestInterceptorUmiRequest;
 type IErrorInterceptor = (error: Error) => Promise<Error>;
 type IResponseInterceptor = <T = any>(response : AxiosResponse<T>) => AxiosResponse<T> ;
 type IRequestInterceptorTuple = [IRequestInterceptor , IErrorInterceptor] | [ IRequestInterceptor ] | IRequestInterceptor
@@ -277,6 +279,8 @@ export type {
   AxiosInstance,
   AxiosRequestConfig,
   AxiosResponse,
+  AxiosError,
+  RequestError,
   IResponseInterceptor as ResponseInterceptor,
   IRequestOptions as RequestOptions,
   IRequest as Request,
@@ -291,27 +295,35 @@ export type {
     const axiosPath = winPath(dirname(require.resolve('axios/package.json')));
     let dataField = api.config.request?.dataField;
     if (dataField === undefined) dataField = 'data';
-    const formatResult =
-      dataField === '' ? `result => result` : `result => result?.${dataField}`;
+    const isEmpty = dataField === '';
+    const formatResult = isEmpty
+      ? `result => result`
+      : `result => result?.${dataField}`;
+    const resultDataType = isEmpty ? dataField : `${dataField}?: T;`;
+    const resultDataField = isEmpty ? dataField : `['${dataField}']`;
     api.writeTmpFile({
       path: 'request.ts',
       content: Mustache.render(requestTpl, {
         umiRequestPath,
         axiosPath,
         formatResult,
+        resultDataType,
+        resultDataField,
       }),
     });
     api.writeTmpFile({
       path: 'types.d.ts',
       content: `
-export type { 
-  RequestConfig,  
+export type {
+  RequestConfig,
   AxiosInstance,
   AxiosRequestConfig,
-  AxiosResponse, 
+  AxiosResponse,
   AxiosError,
   RequestError,
-  ResponseInterceptor } from './request';
+  ResponseInterceptor,
+  RequestOptions,
+  Request } from './request';
 `,
     });
     api.writeTmpFile({
@@ -321,8 +333,19 @@ export {
   useRequest,
   UseRequestProvider,
   request,
+  getRequestInstance,
 } from './request';
 `,
+    });
+
+    api.writeTmpFile({
+      path: RUNTIME_TYPE_FILE_NAME,
+      content: `
+import type { RequestConfig } from './types.d'
+export type IRuntimeConfig = {
+  request?: RequestConfig
+};
+      `,
     });
   });
 };

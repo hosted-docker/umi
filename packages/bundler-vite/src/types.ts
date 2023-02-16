@@ -1,7 +1,6 @@
-import type { HttpsServerOptions } from '@umijs/bundler-utils';
+import type { HttpsServerOptions, ProxyOptions } from '@umijs/bundler-utils';
 import type { PluginVisualizerOptions } from 'rollup-plugin-visualizer';
-import { Options as LegacyOptions } from '../compiled/@vitejs/plugin-legacy';
-import type { Plugin, ProxyOptions } from '../compiled/vite';
+import type { Plugin } from '../compiled/vite';
 
 export enum Env {
   development = 'development',
@@ -19,7 +18,11 @@ export interface ICopy {
   to: string;
 }
 
-export type IBabelPlugin = string | [string, { [key: string]: any }];
+export type IBabelPlugin =
+  | Function
+  | string
+  | [string, { [key: string]: any }]
+  | [string, { [key: string]: any }, string];
 
 export interface IConfig {
   alias?: Record<string, string>;
@@ -39,7 +42,7 @@ export interface IConfig {
   jsMinifier?: JSMinifier | boolean;
   jsMinifierOptions?: { [key: string]: any };
   lessLoader?: { lessOptions: any };
-  legacy?: LegacyOptions | boolean;
+  legacy?: { [key: string]: any } | boolean;
   outputPath?: string;
   polyfill?: { imports: string[] };
   postcssLoader?: { postcssOptions: any };

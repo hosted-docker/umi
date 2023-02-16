@@ -1,4 +1,8 @@
-import { TransformOptions } from '@umijs/bundler-utils/compiled/esbuild';
+import {
+  TransformOptions,
+  BuildOptions,
+} from '@umijs/bundler-utils/compiled/esbuild';
+import type { Plugin } from '@umijs/bundler-vite/compiled/vite';
 
 export enum Env {
   development = 'development',
@@ -15,7 +19,11 @@ export interface ICopy {
   to: string;
 }
 
-export type IBabelPlugin = string | [string, { [key: string]: any }];
+export type IBabelPlugin =
+  | Function
+  | string
+  | [string, { [key: string]: any }]
+  | [string, { [key: string]: any }, string];
 
 export interface IConfig {
   alias?: Record<string, string>;
@@ -39,5 +47,7 @@ export interface IConfig {
   publicPath?: string;
   svgr?: TransformOptions;
   targets?: { [key: string]: any };
+  loader?: BuildOptions['loader'];
+  modifyConfig?: (config: BuildOptions) => void | Promise<void>;
   [key: string]: any;
 }

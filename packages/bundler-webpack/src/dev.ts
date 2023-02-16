@@ -2,11 +2,12 @@ import { MFSU, MF_DEP_PREFIX } from '@umijs/mfsu';
 import { logger, rimraf } from '@umijs/utils';
 import { existsSync } from 'fs';
 import { join, resolve } from 'path';
+import type { Worker } from 'worker_threads';
 import webpack from '../compiled/webpack';
 import { getConfig, IOpts as IConfigOpts } from './config/config';
 import { MFSU_NAME } from './constants';
 import { createServer } from './server/server';
-import { Env, IConfig, Transpiler } from './types';
+import { Env, IConfig } from './types';
 
 type IOpts = {
   afterMiddlewares?: any[];
@@ -16,6 +17,7 @@ type IOpts = {
   onMFSUProgress?: Function;
   port?: number;
   host?: string;
+  ip?: string;
   babelPreset?: any;
   chainWebpack?: Function;
   modifyWebpackConfig?: Function;
@@ -30,31 +32,55 @@ type IOpts = {
   mfsuStrategy?: 'eager' | 'normal';
   mfsuInclude?: string[];
   srcCodeCache?: any;
-} & Pick<IConfigOpts, 'cache'>;
+  startBuildWorker?: (deps: any[]) => Worker;
+  onBeforeMiddleware?: Function;
+} & Pick<IConfigOpts, 'cache' | 'pkg'>;
 
-export function stripUndefined(obj: any) {
-  Object.keys(obj).forEach((key) => {
-    if (obj[key] === undefined) {
-      delete obj[key];
-    }
-  });
-  return obj;
+export function ensureSerializableValue(obj: any) {
+  return JSON.parse(
+    JSON.stringify(
+      obj,
+      (_key, value) => {
+        if (typeof value === 'function') {
+          return value.toString();
+        }
+        return value;
+      },
+      2,
+    ),
+  );
 }
 
 export async function dev(opts: IOpts) {
+  const { mfsu, webpackConfig } = await setup(opts);
+
+  await createServer({
+    webpackConfig,
+    userConfig: opts.config,
+    cwd: opts.cwd,
+    beforeMiddlewares: [
+      ...(mfsu?.getMiddlewares() || []),
+      ...(opts.beforeMiddlewares || []),
+    ],
+    port: opts.port,
+    host: opts.host,
+    ip: opts.ip,
+    afterMiddlewares: [...(opts.afterMiddlewares || [])],
+    onDevCompileDone: opts.onDevCompileDone,
+    onProgress: opts.onProgress,
+    onBeforeMiddleware: opts.onBeforeMiddleware,
+  });
+}
+
+export async function setup(opts: IOpts) {
   const cacheDirectoryPath = resolve(
     opts.rootDir || opts.cwd,
     opts.config.cacheDirectoryPath || 'node_modules/.cache',
   );
   const enableMFSU = opts.config.mfsu !== false;
   let mfsu: MFSU | null = null;
-  if (enableMFSU) {
-    if (opts.config.srcTranspiler === Transpiler.swc) {
-      logger.warn(
-        `Swc currently not supported for use with mfsu, recommended you use srcTranspiler: 'esbuild' in dev.`,
-      );
-    }
 
+  if (enableMFSU) {
     mfsu = new MFSU({
       strategy: opts.mfsuStrategy,
       include: opts.mfsuInclude || [],
@@ -69,8 +95,12 @@ export async function dev(opts: IOpts) {
       tmpBase:
         opts.config.mfsu?.cacheDirectory || join(cacheDirectoryPath, 'mfsu'),
       onMFSUProgress: opts.onMFSUProgress,
+      unMatchLibs: opts.config.mfsu?.exclude,
+      shared: opts.config.mfsu?.shared,
+      remoteAliases: opts.config.mfsu?.remoteAliases,
+      remoteName: opts.config.mfsu?.remoteName,
       getCacheDependency() {
-        return stripUndefined({
+        return ensureSerializableValue({
           version: require('../package.json').version,
           mfsu: opts.config.mfsu,
           alias: opts.config.alias,
@@ -78,8 +108,11 @@ export async function dev(opts: IOpts) {
           theme: opts.config.theme,
           runtimePublicPath: opts.config.runtimePublicPath,
           publicPath: opts.config.publicPath,
+          define: opts.config.define,
         });
       },
+      startBuildWorker: opts.startBuildWorker!,
+      cwd: opts.cwd!,
     });
   }
 
@@ -108,9 +141,15 @@ export async function dev(opts: IOpts) {
     cache: opts.cache
       ? {
           ...opts.cache,
-          cacheDirectory: join(cacheDirectoryPath, 'bundler-webpack'),
+          cacheDirectory: join(
+            cacheDirectoryPath,
+            opts.mfsuStrategy === 'eager'
+              ? 'bundler-webpack-eager'
+              : 'bundler-webpack',
+          ),
         }
       : undefined,
+    pkg: opts.pkg,
   });
 
   const depConfig = await getConfig({
@@ -119,14 +158,17 @@ export async function dev(opts: IOpts) {
     env: Env.development,
     entry: opts.entry,
     userConfig: opts.config,
+    disableCopy: true,
     hash: true,
     staticPathPrefix: MF_DEP_PREFIX,
     name: MFSU_NAME,
     chainWebpack: opts.config.mfsu?.chainWebpack,
+    extraBabelIncludes: opts.config.extraBabelIncludes,
     cache: {
       buildDependencies: opts.cache?.buildDependencies,
       cacheDirectory: join(cacheDirectoryPath, 'mfsu-deps'),
     },
+    pkg: opts.pkg,
   });
 
   webpackConfig.resolve!.alias ||= {};
@@ -159,18 +201,8 @@ export async function dev(opts: IOpts) {
     }
   }
 
-  await createServer({
+  return {
+    mfsu,
     webpackConfig,
-    userConfig: opts.config,
-    cwd: opts.cwd,
-    beforeMiddlewares: [
-      ...(mfsu?.getMiddlewares() || []),
-      ...(opts.beforeMiddlewares || []),
-    ],
-    port: opts.port,
-    host: opts.host,
-    afterMiddlewares: [...(opts.afterMiddlewares || [])],
-    onDevCompileDone: opts.onDevCompileDone,
-    onProgress: opts.onProgress,
-  });
+  };
 }

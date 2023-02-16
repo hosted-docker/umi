@@ -1,27 +1,12 @@
-import { pkgUp, winPath } from '@umijs/utils';
+import { pkgUp, winPath, logger, chalk } from '@umijs/utils';
 import assert from 'assert';
-import enhancedResolve from 'enhanced-resolve';
 import { readFileSync } from 'fs';
-import { isAbsolute, join } from 'path';
+import { isAbsolute, join, dirname } from 'path';
 import { MF_VA_PREFIX } from '../constants';
 import { MFSU } from '../mfsu/mfsu';
 import { trimFileContent } from '../utils/trimFileContent';
 import { getExposeFromContent } from './getExposeFromContent';
-
-const resolver = enhancedResolve.create({
-  mainFields: ['module', 'browser', 'main'], // es module first
-  extensions: ['.wasm', '.mjs', '.js', '.jsx', '.ts', '.tsx', '.json'],
-  exportsFields: ['exports'],
-  conditionNames: ['import', 'module', 'require', 'node'],
-});
-
-async function resolve(context: string, path: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    resolver(context, path, (err: Error, result: string) =>
-      err ? reject(err) : resolve(result),
-    );
-  });
-}
+import { resolveFromContexts } from '../utils/resolveUtils';
 
 export class Dep {
   public file: string;
@@ -30,13 +15,15 @@ export class Dep {
   public shortFile: string;
   public normalizedFile: string;
   public filePath: string;
-  public mfsu: MFSU;
+  public excludeNodeNatives: boolean;
+  public importer: string | undefined;
 
   constructor(opts: {
     file: string;
     version: string;
     cwd: string;
-    mfsu: MFSU;
+    excludeNodeNatives: boolean;
+    importer?: string;
   }) {
     this.file = winPath(opts.file);
     this.version = opts.version;
@@ -44,7 +31,8 @@ export class Dep {
     this.shortFile = this.file;
     this.normalizedFile = this.shortFile.replace(/\//g, '_').replace(/:/g, '_');
     this.filePath = `${MF_VA_PREFIX}${this.normalizedFile}.js`;
-    this.mfsu = opts.mfsu;
+    this.excludeNodeNatives = opts.excludeNodeNatives!;
+    this.importer = opts.importer;
   }
 
   async buildExposeContent() {
@@ -53,7 +41,7 @@ export class Dep {
     const isNodeNatives = !!process.binding('natives')[this.file];
     if (isNodeNatives) {
       return trimFileContent(
-        this.mfsu.opts.excludeNodeNatives
+        this.excludeNodeNatives
           ? `
 const _ = require('${this.file}');
 module.exports = _;
@@ -68,7 +56,15 @@ export * from '${this.file}';
 
     // none node natives
     const realFile = await this.getRealFile();
-    assert(realFile, `filePath not found of ${this.file}`);
+
+    if (!realFile) {
+      logger.error(
+        `Can not resolve dependence : '${chalk.red(
+          this.file,
+        )}', please install it`,
+      );
+    }
+    assert(realFile, `dependence not found: ${this.file}`);
     const content = readFileSync(realFile, 'utf-8');
     return await getExposeFromContent({
       content,
@@ -79,16 +75,21 @@ export * from '${this.file}';
 
   async getRealFile() {
     try {
+      const contexts = [this.cwd];
+      if (this.importer) {
+        contexts.push(dirname(this.importer));
+      }
+
       // don't need to handle alias here
       // it's already handled by babel plugin
-      return await resolve(this.cwd, this.file);
+      return await resolveFromContexts(contexts, this.file);
     } catch (e) {
       return null;
     }
   }
 
   static buildDeps(opts: {
-    deps: Record<string, { file: string; version: string }>;
+    deps: Record<string, { file: string; version: string; importer?: string }>;
     cwd: string;
     mfsu: MFSU;
   }) {
@@ -96,7 +97,7 @@ export * from '${this.file}';
       return new Dep({
         ...opts.deps[file],
         cwd: opts.cwd,
-        mfsu: opts.mfsu,
+        excludeNodeNatives: opts.mfsu.opts.excludeNodeNatives!,
       });
     });
   }

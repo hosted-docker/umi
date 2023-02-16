@@ -4,11 +4,14 @@ import type {
   Request,
   Response,
 } from '@umijs/bundler-utils/compiled/express';
-import { lodash, logger, printHelp, tryPaths, winPath } from '@umijs/utils';
+import express from '@umijs/bundler-utils/compiled/express';
+import { lodash, logger, printHelp, winPath } from '@umijs/utils';
 import assert from 'assert';
-import { readFileSync, statSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { extname, join } from 'path';
 import webpack, { Configuration } from 'webpack';
+import type { Worker } from 'worker_threads';
+import isAbsoluteUrl from '../../compiled/is-absolute-url';
 import { lookup } from '../../compiled/mrmime';
 // @ts-ignore
 import WebpackVirtualModules from '../../compiled/webpack-virtual-modules';
@@ -20,6 +23,7 @@ import {
   MF_VA_PREFIX,
   REMOTE_FILE,
   REMOTE_FILE_FULL,
+  VIRTUAL_ENTRY_DIR,
 } from '../constants';
 import { Dep } from '../dep/dep';
 import { DepBuilder } from '../depBuilder/depBuilder';
@@ -29,6 +33,7 @@ import getAwaitImportHandler, {
 } from '../esbuildHandlers/awaitImport';
 import { Mode } from '../types';
 import { makeArray } from '../utils/makeArray';
+import { getResolver } from '../utils/webpackUtils';
 import {
   BuildDepPlugin,
   IBuildDepPluginOpts,
@@ -45,7 +50,7 @@ interface IOpts {
   mfName?: string;
   mode?: Mode;
   tmpBase?: string;
-  unMatchLibs?: string[];
+  unMatchLibs?: Array<string | RegExp>;
   runtimePublicPath?: boolean | string;
   implementor: typeof webpack;
   buildDepWithESBuild?: boolean;
@@ -53,6 +58,10 @@ interface IOpts {
   strategy?: 'eager' | 'normal';
   include?: string[];
   srcCodeCache?: any;
+  shared?: any;
+  remoteName?: string;
+  remoteAliases?: string[];
+  startBuildWorker: (dep: any[]) => Worker;
 }
 
 export class MFSU {
@@ -66,6 +75,7 @@ export class MFSU {
   public onProgress: Function;
   public publicPath: string = '/';
   private strategy: IMFSUStrategy;
+  private lastBuildError: any = null;
 
   constructor(opts: IOpts) {
     this.opts = opts;
@@ -125,7 +135,7 @@ export class MFSU {
     Object.assign(this.alias, opts.config.resolve?.alias || {});
     this.externals.push(...makeArray(opts.config.externals || []));
     // entry
-    const entry: Record<string, string> = {};
+    const entry: Record<string, string | string[]> = {};
     const virtualModules: Record<string, string> = {};
     // ensure entry object type
     const entryObject = lodash.isString(opts.config.entry)
@@ -136,28 +146,30 @@ export class MFSU {
       `webpack config 'entry' value must be a string or an object.`,
     );
     for (const key of Object.keys(entryObject)) {
-      const virtualPath = `./mfsu-virtual-entry/${key}.js`;
+      // 如果是项目导出的远端模块 不需要处理成动态加载的模块 以避免加载错误
+      if (key === this.opts.remoteName) {
+        entry[key] = entryObject[key];
+        continue;
+      }
+
+      const virtualPath = `./${VIRTUAL_ENTRY_DIR}/${key}.js`;
       const virtualContent: string[] = [];
       let index = 1;
       let hasDefaultExport = false;
       const entryFiles = lodash.isArray(entryObject[key])
         ? entryObject[key]
         : ([entryObject[key]] as unknown as string[]);
+
+      const resolver = getResolver(opts.config);
       for (let entry of entryFiles) {
         // ensure entry is a file
-        if (statSync(entry).isDirectory()) {
-          const realEntry = tryPaths([
-            join(entry, 'index.tsx'),
-            join(entry, 'index.ts'),
-            join(entry, 'index.jsx'),
-            join(entry, 'index.js'),
-          ]);
-          assert(
-            realEntry,
-            `entry file not found, please configure the specific entry path. (e.g. 'src/index.tsx')`,
-          );
-          entry = realEntry;
-        }
+        const realEntry = resolver(entry);
+        assert(
+          realEntry,
+          `entry file not found (${entry}), please configure the specific entry path. (e.g. 'src/index.tsx')`,
+        );
+        entry = realEntry;
+
         const content = readFileSync(entry, 'utf-8');
         const [_imports, exports] = await parseModule({ content, path: entry });
         if (exports.length) {
@@ -188,17 +200,15 @@ export class MFSU {
     opts.config.plugins = opts.config.plugins || [];
 
     // support publicPath auto
-    let publicPath = opts.config.output!.publicPath;
-    if (publicPath === 'auto') {
-      publicPath = '/';
-    }
-    this.publicPath = publicPath as string;
+    let publicPath = resolvePublicPath(opts.config);
+    this.publicPath = publicPath;
 
     opts.config.plugins!.push(
       ...[
         new WebpackVirtualModules(virtualModules),
         new this.opts.implementor.container.ModuleFederationPlugin({
           name: '__',
+          shared: this.opts.shared || {},
           remotes: {
             [mfName!]: this.opts.runtimePublicPath
               ? // ref:
@@ -226,8 +236,8 @@ promise new Promise(resolve => {
   // inject this script with the src set to the versioned remoteEntry.js
   document.head.appendChild(script);
 })
-                `.trimLeft()
-              : `${mfName}@${publicPath}${REMOTE_FILE_FULL}`,
+                `.trimStart()
+              : `${mfName}@${publicPath}${REMOTE_FILE_FULL}`, // mfsu 的入口文件如果需要在其他的站点上被引用,需要显示的指定publicPath,以保证入口文件的正确访问
           },
         }),
         new BuildDepPlugin(this.strategy.getBuildDepPlugConfig()),
@@ -247,42 +257,49 @@ promise new Promise(resolve => {
      */
     this.depConfig = opts.depConfig;
 
-    this.strategy.init();
+    this.strategy.init(opts.config);
   }
 
-  async buildDeps() {
-    const shouldBuild = this.strategy.shouldBuild();
-    if (!shouldBuild) {
-      logger.info('[MFSU] skip buildDeps');
-      return;
-    }
+  async buildDeps(opts: { useWorker: boolean } = { useWorker: true }) {
+    try {
+      const shouldBuild = this.strategy.shouldBuild();
+      if (!shouldBuild) {
+        logger.info('[MFSU] skip buildDeps');
+        return;
+      }
 
-    // Snapshot after compiled success
-    this.strategy.refresh();
+      // Snapshot after compiled success
+      this.strategy.refresh();
 
-    const staticDeps = this.strategy.getDepModules();
+      const staticDeps = this.strategy.getDepModules();
 
-    const deps = Dep.buildDeps({
-      deps: staticDeps,
-      cwd: this.opts.cwd!,
-      mfsu: this,
-    });
-    logger.info(`[MFSU] buildDeps since ${shouldBuild}`);
-    logger.debug(deps.map((dep) => dep.file).join(', '));
-
-    await this.depBuilder.build({
-      deps,
-    });
-
-    // Write cache
-    this.strategy.writeCache();
-
-    if (this.buildDepsAgain) {
-      logger.info('[MFSU] buildDepsAgain');
-      this.buildDepsAgain = false;
-      this.buildDeps().catch((e: Error) => {
-        printHelp.runtime(e);
+      const deps = Dep.buildDeps({
+        deps: staticDeps,
+        cwd: this.opts.cwd!,
+        mfsu: this,
       });
+      logger.info(`[MFSU] buildDeps since ${shouldBuild}`);
+      logger.debug(deps.map((dep) => dep.file).join(', '));
+
+      await this.depBuilder.build({
+        deps,
+        useWorker: opts.useWorker,
+      });
+      this.lastBuildError = null;
+
+      // Write cache
+      this.strategy.writeCache();
+
+      if (this.buildDepsAgain) {
+        logger.info('[MFSU] buildDepsAgain');
+        this.buildDepsAgain = false;
+        this.buildDeps().catch((e: Error) => {
+          printHelp.runtime(e);
+        });
+      }
+    } catch (e) {
+      this.lastBuildError = e;
+      throw e;
     }
   }
 
@@ -290,10 +307,13 @@ promise new Promise(resolve => {
     return [
       (req: Request, res: Response, next: NextFunction) => {
         const publicPath = this.publicPath;
+        const relativePublicPath = isAbsoluteUrl(publicPath)
+          ? new URL(publicPath).pathname
+          : publicPath;
         const isMF =
-          req.path.startsWith(`${publicPath}${MF_VA_PREFIX}`) ||
-          req.path.startsWith(`${publicPath}${MF_DEP_PREFIX}`) ||
-          req.path.startsWith(`${publicPath}${MF_STATIC_PREFIX}`);
+          req.path.startsWith(`${relativePublicPath}${MF_VA_PREFIX}`) ||
+          req.path.startsWith(`${relativePublicPath}${MF_DEP_PREFIX}`) ||
+          req.path.startsWith(`${relativePublicPath}${MF_STATIC_PREFIX}`);
         if (isMF) {
           this.depBuilder.onBuildComplete(() => {
             if (!req.path.includes(REMOTE_FILE)) {
@@ -304,18 +324,32 @@ promise new Promise(resolve => {
               lookup(extname(req.path)) || 'text/plain',
             );
             const relativePath = req.path.replace(
-              new RegExp(`^${publicPath}`),
+              new RegExp(`^${relativePublicPath}`),
               '/',
             );
-            const content = readFileSync(
-              join(this.opts.tmpBase!, relativePath),
-            );
+
+            const realFilePath = join(this.opts.tmpBase!, relativePath);
+
+            if (!existsSync(realFilePath)) {
+              logger.error(`MFSU dist file: ${realFilePath} not found`);
+              if (this.lastBuildError) {
+                logger.error(`MFSU latest build error: `, this.lastBuildError);
+              }
+
+              res.status(404);
+              return res.end();
+            }
+
+            const content = readFileSync(realFilePath);
             res.send(content);
           });
         } else {
           next();
         }
       },
+      // 兜底依赖构建时, 代码中有指定 chunk 名的情况
+      // TODO: should respect to publicPath
+      express.static(this.opts.tmpBase!),
     ];
   }
 
@@ -346,8 +380,19 @@ promise new Promise(resolve => {
   }
 }
 
+export function resolvePublicPath(config: Configuration): string {
+  let publicPath = config.output?.publicPath ?? 'auto';
+  if (publicPath === 'auto') {
+    publicPath = '/';
+  }
+
+  assert(typeof publicPath === 'string', 'Not support function publicPath now');
+
+  return publicPath;
+}
+
 export interface IMFSUStrategy {
-  init(): void;
+  init(webpackConfig: Configuration): void;
 
   shouldBuild(): string | boolean;
 

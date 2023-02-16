@@ -1,6 +1,10 @@
-import { createHttpsServer, resolveHttpsConfig } from '@umijs/bundler-utils';
+import {
+  createHttpsServer,
+  createProxy,
+  resolveHttpsConfig,
+} from '@umijs/bundler-utils';
 import express from '@umijs/bundler-utils/compiled/express';
-import { logger } from '@umijs/utils';
+import { getDevBanner, logger } from '@umijs/utils';
 import http from 'http';
 import type {
   DepOptimizationMetadata,
@@ -14,6 +18,7 @@ import pluginOnHotUpdate from './plugins/onHotUpdate';
 interface IOpts {
   cwd: string;
   port?: number;
+  host?: string;
   viteConfig: ViteInlineConfig;
   userConfig: IConfig;
   beforeMiddlewares?: any[];
@@ -33,9 +38,10 @@ interface IOpts {
     isFirstCompile: boolean;
     stats: HmrContext['modules'] | DepOptimizationMetadata;
   }) => Promise<void> | void;
+  onBeforeMiddleware?: Function;
 }
 
-export async function createServer(opts: IOpts) {
+export async function createServer(opts: IOpts): Promise<any> {
   const startTms = +new Date();
   const { viteConfig, userConfig, onDevCompileDone } = opts;
   const app = express();
@@ -69,11 +75,20 @@ export async function createServer(opts: IOpts) {
           ]),
         }
       : {}),
-    server: { ...viteConfigServer, middlewareMode: 'html' },
+    server: { ...viteConfigServer, middlewareMode: true },
   });
 
   // before middlewares
   opts.beforeMiddlewares?.forEach((m) => app.use(m));
+
+  if (opts.onBeforeMiddleware) {
+    opts.onBeforeMiddleware(app);
+  }
+
+  // proxy
+  if (userConfig.proxy) {
+    createProxy(userConfig.proxy, app);
+  }
 
   // after middlewares, insert before vite spaFallbackMiddleware
   // refer: https://github.com/vitejs/vite/blob/2c586165d7bc4b60f8bcf1f3b462b97a72cce58c/packages/vite/src/node/server/index.ts#L508
@@ -126,9 +141,11 @@ export async function createServer(opts: IOpts) {
       });
     }
 
-    const host = process.env.HOST || 'localhost';
+    const banner = getDevBanner(protocol, opts.host, port);
 
-    logger.ready(`Example app listening at ${protocol}//${host}:${port}`);
+    console.log(banner.before);
+    logger.ready(banner.main);
+    console.log(banner.after);
   });
 
   return server;

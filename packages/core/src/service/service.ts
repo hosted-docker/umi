@@ -2,7 +2,7 @@ import {
   AsyncSeriesWaterfallHook,
   SyncWaterfallHook,
 } from '@umijs/bundler-utils/compiled/tapable';
-import { chalk, lodash, yParser } from '@umijs/utils';
+import { chalk, fastestLevenshtein, lodash, yParser } from '@umijs/utils';
 import assert from 'assert';
 import { existsSync } from 'fs';
 import { isAbsolute, join } from 'path';
@@ -264,25 +264,32 @@ export class Service {
     this.pkgPath = pkgPath || join(this.cwd, 'package.json');
 
     const prefix = this.opts.frameworkName || DEFAULT_FRAMEWORK_NAME;
+    const specifiedEnv = process.env[`${prefix}_ENV`.toUpperCase()];
+    // https://github.com/umijs/umi/pull/9105
+    // assert(
+    //   !specifiedEnv ||
+    //     (specifiedEnv && !Object.values(SHORT_ENV).includes(specifiedEnv)),
+    //   `${chalk.yellow(
+    //     Object.values(SHORT_ENV).join(', '),
+    //   )} config files will be auto loaded by env, Do not configure ${chalk.cyan(
+    //     `process.env.${prefix.toUpperCase()}_ENV`,
+    //   )} with these values`,
+    // );
     // get user config
     const configManager = new Config({
       cwd: this.cwd,
       env: this.env,
       defaultConfigFiles: this.opts.defaultConfigFiles,
-      specifiedEnv: process.env[`${prefix}_ENV`.toUpperCase()],
+      specifiedEnv,
     });
 
     this.configManager = configManager;
     this.userConfig = configManager.getUserConfig().config;
     // get paths
-    const paths = getPaths({
-      cwd: this.cwd,
-      env: this.env,
-      prefix: this.opts.frameworkName || DEFAULT_FRAMEWORK_NAME,
-    });
     // temporary paths for use by function generateFinalConfig.
     // the value of paths may be updated by plugins later
-    this.paths = paths;
+    // 抽离成函数，方便后续继承覆盖
+    this.paths = await this.getPaths();
 
     // resolve initial presets and plugins
     const { plugins, presets } = Plugin.getPluginsAndPresets({
@@ -313,7 +320,10 @@ export class Service {
       await this.initPlugin({ plugin: plugins.shift()!, plugins });
     }
     const command = this.commands[name];
-    assert(command, `Invalid command ${name}, it's not registered.`);
+    if (!command) {
+      this.commandGuessHelper(Object.keys(this.commands), name);
+      throw Error(`Invalid command ${chalk.red(name)}, it's not registered.`);
+    }
     // collect configSchemas and configDefaults
     for (const id of Object.keys(this.plugins)) {
       const { config, key } = this.plugins[id];
@@ -327,13 +337,13 @@ export class Service {
     this.stage = ServiceStage.resolveConfig;
     const { config, defaultConfig } = await this.resolveConfig();
     if (this.config.outputPath) {
-      paths.absOutputPath = isAbsolute(this.config.outputPath)
+      this.paths.absOutputPath = isAbsolute(this.config.outputPath)
         ? this.config.outputPath
         : join(this.cwd, this.config.outputPath);
     }
     this.paths = await this.applyPlugins({
       key: 'modifyPaths',
-      initialValue: paths,
+      initialValue: this.paths,
     });
     // applyPlugin collect app data
     // TODO: some data is mutable
@@ -380,8 +390,18 @@ export class Service {
     // run command
     this.stage = ServiceStage.runCommand;
     let ret = await command.fn({ args });
-    this._baconPlugins();
+    this._profilePlugins();
     return ret;
+  }
+
+  async getPaths() {
+    // get paths
+    const paths = getPaths({
+      cwd: this.cwd,
+      env: this.env,
+      prefix: this.opts.frameworkName || DEFAULT_FRAMEWORK_NAME,
+    });
+    return paths;
   }
 
   async resolveConfig() {
@@ -408,21 +428,67 @@ export class Service {
     });
     const defaultConfig = await this.applyPlugins({
       key: 'modifyDefaultConfig',
-      initialValue: this.configDefaults,
+      // 避免 modifyDefaultConfig 时修改 this.configDefaults
+      initialValue: lodash.cloneDeep(this.configDefaults),
     });
     this.config = lodash.merge(defaultConfig, config) as Record<string, any>;
 
     return { config, defaultConfig };
   }
 
-  _baconPlugins() {
-    // TODO: prettier
-    if (this.args.baconPlugins) {
+  _profilePlugins() {
+    if (this.args.profilePlugins) {
       console.log();
-      for (const id of Object.keys(this.plugins)) {
-        const plugin = this.plugins[id];
-        console.log(chalk.green('plugin'), plugin.id, plugin.time);
-      }
+      Object.keys(this.plugins)
+        .map((id) => {
+          const plugin = this.plugins[id];
+          const total = totalTime(plugin);
+          return {
+            id,
+            total,
+            register: plugin.time.register || 0,
+            hooks: plugin.time.hooks,
+          };
+        })
+        .filter((time) => {
+          return time.total > (this.args.profilePluginsLimit ?? 10);
+        })
+        .sort((a, b) => (b.total > a.total ? 1 : -1))
+        .forEach((time) => {
+          console.log(chalk.green('plugin'), time.id, time.total);
+          if (this.args.profilePluginsVerbose) {
+            console.log('      ', chalk.green('register'), time.register);
+            console.log(
+              '      ',
+              chalk.green('hooks'),
+              JSON.stringify(sortHooks(time.hooks)),
+            );
+          }
+        });
+    }
+
+    function sortHooks(hooks: Record<string, number[]>) {
+      const ret: Record<string, number[]> = {};
+      Object.keys(hooks)
+        .sort((a, b) => {
+          return add(hooks[b]) - add(hooks[a]);
+        })
+        .forEach((key) => {
+          ret[key] = hooks[key];
+        });
+      return ret;
+    }
+
+    function totalTime(plugin: Plugin) {
+      const time = plugin.time;
+      return (
+        (time.register || 0) +
+        Object.values(time.hooks).reduce<number>((a, b) => a + add(b), 0)
+      );
+    }
+
+    function add(nums: number[]) {
+      return nums.reduce((a, b) => a + b, 0);
     }
   }
 
@@ -561,6 +627,35 @@ export class Service {
       });
     // EnableBy.register
     return true;
+  }
+
+  commandGuessHelper(commands: string[], currentCmd: string) {
+    const altCmds = commands.filter((cmd) => {
+      return (
+        fastestLevenshtein.distance(currentCmd, cmd) <
+          currentCmd.length * 0.6 && currentCmd !== cmd
+      );
+    });
+    const printHelper = altCmds
+      .slice(0, 3)
+      .map((cmd) => {
+        return ` - ${chalk.green(cmd)}`;
+      })
+      .join('\n');
+    if (altCmds.length) {
+      console.log();
+      console.log(
+        [
+          chalk.cyan(
+            altCmds.length === 1
+              ? 'Did you mean this command ?'
+              : 'Did you mean one of these commands ?',
+          ),
+          printHelper,
+        ].join('\n'),
+      );
+      console.log();
+    }
   }
 }
 

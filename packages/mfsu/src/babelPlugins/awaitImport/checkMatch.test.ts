@@ -19,12 +19,42 @@ test('unMatch libs', () => {
   ).toEqual(false);
 });
 
+test('unMatch libs full match', () => {
+  expect(
+    checkMatch({
+      value: 'vant/es/button',
+      opts: {
+        unMatchLibs: ['vant'],
+      },
+    }),
+  ).toEqual({
+    isMatch: true,
+    replaceValue: 'mf/vant/es/button',
+    value: 'vant/es/button',
+  });
+});
+
+test('unMatch libs regExp', () => {
+  expect(
+    checkMatch({
+      value: 'vant/es/button',
+      opts: {
+        unMatchLibs: [/^vant/],
+      },
+    }).isMatch,
+  ).toEqual(false);
+});
+
 test('start with mf/', () => {
   expect(
     checkMatch({
       value: 'mf/foo',
-    }).isMatch,
-  ).toEqual(false);
+    }),
+  ).toEqual({
+    isMatch: true,
+    value: 'foo',
+    replaceValue: 'mf/foo',
+  });
 });
 
 test('babel/svgr-webpack', () => {

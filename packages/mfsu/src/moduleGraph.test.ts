@@ -159,3 +159,89 @@ test('snapshot + hasDepChanged', () => {
   });
   expect(mg.hasDepChanged()).toEqual(true);
 });
+
+test('different modules have same deps', () => {
+  const mg = new ModuleGraph();
+  mg.onFileChange({
+    file: 'a',
+    deps: [{ file: 'c', isDependency: true, version: '0.2.0' }],
+  });
+  mg.onFileChange({
+    file: 'b',
+    deps: [{ file: 'c', isDependency: true, version: '0.2.0' }],
+  });
+
+  const restored = new ModuleGraph();
+  restored.restore(mg.toJSON());
+  const bMod = restored.fileToModules.get('b');
+
+  expect(bMod!.importedModules.size).toEqual(1);
+});
+
+test('circular deps restore', () => {
+  const mg = new ModuleGraph();
+  mg.onFileChange({
+    file: 'a',
+    deps: [{ file: 'b', isDependency: false }],
+  });
+  mg.onFileChange({
+    file: 'b',
+    deps: [{ file: 'c', isDependency: false }],
+  });
+  mg.onFileChange({
+    file: 'c',
+    deps: [{ file: 'a', isDependency: false }],
+  });
+
+  const restored = new ModuleGraph();
+  restored.restore(mg.toJSON());
+});
+
+test('deps with importer', () => {
+  const mg = new ModuleGraph();
+  mg.onFileChange({
+    file: 'a',
+    deps: [{ file: 'b', isDependency: true, version: '0.0.1' }],
+  });
+
+  mg.snapshotDeps();
+
+  expect(mg.depSnapshotModules).toEqual({
+    b: { file: 'b', version: '0.0.1', importer: 'a' },
+  });
+});
+
+test('deps compare ignore importer', () => {
+  const mg = new ModuleGraph();
+  mg.onFileChange({
+    file: 'a',
+    deps: [{ file: 'b', isDependency: true, version: '0.0.1' }],
+  });
+
+  mg.snapshotDeps();
+
+  mg.onFileChange({
+    file: 'a',
+    deps: [],
+  });
+  mg.onFileChange({
+    file: 'c',
+    deps: [{ file: 'b', isDependency: true, version: '0.0.1' }],
+  });
+
+  expect(mg.hasDepChanged()).toEqual(false);
+});
+
+test('deps compare ignore importer when no importer', () => {
+  const mg = new ModuleGraph();
+  mg.onFileChange({
+    file: 'a',
+    deps: [{ file: 'b', isDependency: true, version: '0.0.1' }],
+  });
+
+  mg.depSnapshotModules = {
+    b: { file: 'b', version: '0.0.1' },
+  };
+
+  expect(mg.hasDepChanged()).toEqual(false);
+});

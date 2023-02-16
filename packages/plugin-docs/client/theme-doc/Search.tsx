@@ -1,9 +1,9 @@
 import cx from 'classnames';
+import slugger from 'github-slugger';
 import key from 'keymaster';
 import React, { Fragment, useEffect, useState } from 'react';
 import { useThemeContext } from './context';
 import useLanguage from './useLanguage';
-import getLinkFromTitle from './utils/getLinkFromTitle';
 
 export default () => {
   const { components } = useThemeContext()!;
@@ -94,7 +94,7 @@ export default () => {
           id="search-results-wrapper"
           className={cx(
             'absolute transition-all duration-500 top-12 w-96 rounded-lg',
-            'cursor-pointer shadow overflow-hidden',
+            'cursor-pointer shadow overflow-y-scroll',
             keyword && isFocused ? 'max-h-80' : 'max-h-0',
           )}
         >
@@ -140,6 +140,7 @@ function search(routes: any, keyword: string): SearchResultItem[] {
   if (!keyword) return [];
 
   const result: SearchResultItem[] = [];
+  const EXCLUDE_PATH = ['README', 'docs-layout'];
 
   function addResult(newResult: { path: string; href: string }) {
     const { path, href } = newResult;
@@ -147,7 +148,14 @@ function search(routes: any, keyword: string): SearchResultItem[] {
     result.push({ path, href });
   }
 
-  Object.keys(routes).map((path) => {
+  Object.keys(routes).forEach((path) => {
+    if (
+      path.split('/')[0] === 'components' ||
+      EXCLUDE_PATH.includes(path) ||
+      /.zh-CN$/.test(path)
+    ) {
+      return;
+    }
     if (path.toLowerCase().includes(keyword.toLowerCase())) {
       addResult({
         path: path.split('/').slice(1).join(' > '),
@@ -168,7 +176,7 @@ function search(routes: any, keyword: string): SearchResultItem[] {
               .join(' > ') +
             ' > ' +
             title.title,
-          href: '/' + path + '#' + getLinkFromTitle(title.title),
+          href: '/' + path + '#' + slugger.slug(title.title),
         });
       }
     });

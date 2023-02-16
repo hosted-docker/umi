@@ -9,7 +9,13 @@ export default defineConfig({
       component: 'index',
       name: 'index',
     },
-    { path: '/users', icon: 'SmileFilled', component: 'users', name: 'users' },
+    {
+      path: '/users',
+      icon: 'SmileFilled',
+      component: 'users',
+      name: 'users',
+      wrappers: ['@/wrappers/foo', '@/wrappers/bar'],
+    },
     {
       path: '/accessAllow',
       icon: 'SmileFilled',
@@ -24,7 +30,6 @@ export default defineConfig({
       name: 'Deny',
       access: 'canReadBar',
     },
-    { path: '/users', icon: 'SmileFilled', component: 'users', name: 'users' },
     { path: '/app1/*', icon: 'SmileFilled', name: 'app1', microApp: 'app1' },
     {
       path: '/data-flow',
@@ -46,9 +51,13 @@ export default defineConfig({
         },
       ],
     },
+    {
+      path: '/history',
+      component: 'history',
+    },
   ],
   antd: {
-    import: true,
+    // import: true,
     style: 'less',
     // dark: true,
   },
@@ -69,7 +78,7 @@ export default defineConfig({
     title: 'Ant Design Pro',
   },
   mfsu: {
-    esbuild: true,
+    // esbuild: true,
   },
   request: {},
   locale: {
@@ -88,7 +97,11 @@ export default defineConfig({
       ],
     },
   },
+  tailwindcss: {},
   // vite: {}
   // esmi: { cdnOrigin: 'https://npmcore-pre.alipay.com' },
   // lowImport: {},
+  codeSplitting: {
+    jsStrategy: 'granularChunks',
+  },
 });

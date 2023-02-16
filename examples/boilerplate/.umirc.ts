@@ -1,6 +1,7 @@
 import extraConfig from './extraConfig';
+import { defineConfig } from 'umi';
 
-export default {
+export default defineConfig({
   base: '/foo',
   publicPath: '/foo/',
   // history: { type: 'hash' },
@@ -30,7 +31,7 @@ export default {
       component: 'about',
     },
     {
-      path: '/class-component',
+      path: '/class-component/:id',
       component: 'class-component',
     },
     {
@@ -52,14 +53,16 @@ export default {
       'G6',
     ],
   },
-  chainWebpack(memo: any) {
+  chainWebpack(memo, { webpack: _ }) {
     memo;
   },
   mfsu: {
     esbuild: true,
   },
   // vite: {},
-  deadCode: {},
+  deadCode: {
+    exclude: ['pages/unused/**'],
+  },
   https: {},
   // fastRefresh: false,
   // favicon: 'https://sivers.com/favicon.ico',
@@ -83,5 +86,20 @@ export default {
     },
   },
   cacheDirectoryPath: 'node_modules/.cache1',
+  metas: [
+    {
+      name: 'viewport',
+      content: `width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no`,
+    },
+    {
+      'http-equiv': 'X-UA-Compatible',
+      content: 'IE=edge,chrome=1',
+    },
+    {
+      name: 'description',
+      content: 'umijs',
+    },
+  ],
+  styles: ['//cdn.bootcdn.net/ajax/libs/normalize/8.0.1/normalize.min.css'],
   ...extraConfig,
-};
+});

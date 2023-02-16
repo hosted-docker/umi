@@ -13,10 +13,13 @@ interface IOpts {
   mfsu: MFSU;
 }
 
+const MF_ENTRY = 'mf_index.js';
+
 export class DepBuilder {
   public opts: IOpts;
   public completeFns: Function[] = [];
   public isBuilding = false;
+
   constructor(opts: IOpts) {
     this.opts = opts;
   }
@@ -46,7 +49,10 @@ export class DepBuilder {
 
   // TODO: support watch and rebuild
   async buildWithESBuild(opts: { onBuildComplete: Function; deps: Dep[] }) {
-    const entryContent = getESBuildEntry({ deps: opts.deps });
+    const entryContent = getESBuildEntry({
+      mfName: this.opts.mfsu.opts.mfName!,
+      deps: opts.deps,
+    });
     const ENTRY_FILE = 'esbuild-entry.js';
     const tmpDir = this.opts.mfsu.opts.tmpBase!;
     const entryPath = join(tmpDir, ENTRY_FILE);
@@ -71,7 +77,47 @@ export class DepBuilder {
     opts.onBuildComplete();
   }
 
-  async build(opts: { deps: Dep[] }) {
+  async buildWithWorker(opts: { onBuildComplete: Function; deps: Dep[] }) {
+    const worker = this.opts.mfsu.opts.startBuildWorker(opts.deps);
+
+    worker.postMessage(opts.deps);
+
+    return new Promise<void>((resolve, reject) => {
+      const onMessage = ({
+        progress,
+        done,
+      }: {
+        done: { withError: any };
+        error: any;
+        progress: any;
+      }) => {
+        if (done) {
+          opts.onBuildComplete();
+          worker.off('message', onMessage);
+          if (done.withError) {
+            logger.debug('[MFSU][eager][main] build failed', done.withError);
+            reject(done.withError);
+          } else {
+            resolve();
+          }
+        }
+
+        if (progress) {
+          this.opts.mfsu.onProgress(progress);
+        }
+      };
+
+      worker.on('message', onMessage);
+
+      worker.once('error', (e) => {
+        logger.error('[MFSU][eager] worker got Error', e);
+        opts.onBuildComplete();
+        reject(e);
+      });
+    });
+  }
+
+  async build(opts: { deps: Dep[]; useWorker: boolean }) {
     this.isBuilding = true;
 
     const onBuildComplete = () => {
@@ -81,15 +127,22 @@ export class DepBuilder {
     };
 
     try {
-      await this.writeMFFiles({ deps: opts.deps });
-      const newOpts = {
+      const buildOpts = {
         ...opts,
         onBuildComplete,
       };
+
+      if (this.opts.mfsu.opts.strategy === 'eager' && opts.useWorker) {
+        await this.buildWithWorker(buildOpts);
+        return;
+      }
+
+      await this.writeMFFiles({ deps: opts.deps });
+
       if (this.opts.mfsu.opts.buildDepWithESBuild) {
-        await this.buildWithESBuild(newOpts);
+        await this.buildWithESBuild(buildOpts);
       } else {
-        await this.buildWithWebpack(newOpts);
+        await this.buildWithWebpack(buildOpts);
       }
     } catch (e) {
       onBuildComplete();
@@ -116,16 +169,20 @@ export class DepBuilder {
     }
 
     // index file
-    writeFileSync(join(tmpBase, 'index.js'), '"😛"', 'utf-8');
+    writeFileSync(join(tmpBase, MF_ENTRY), '"😛"', 'utf-8');
   }
 
   getWebpackConfig(opts: { deps: Dep[] }) {
-    const mfName = this.opts.mfsu.opts.mfName;
+    const mfName = this.opts.mfsu.opts.mfName!;
     const depConfig = lodash.cloneDeep(this.opts.mfsu.depConfig!);
 
     // depConfig.stats = 'none';
-    depConfig.entry = join(this.opts.mfsu.opts.tmpBase!, 'index.js');
+    depConfig.entry = join(this.opts.mfsu.opts.tmpBase!, MF_ENTRY);
+
     depConfig.output!.path = this.opts.mfsu.opts.tmpBase!;
+
+    depConfig.output!.publicPath = 'auto';
+
     // disable devtool
     depConfig.devtool = false;
     // disable library
@@ -137,7 +194,18 @@ export class DepBuilder {
     // merge all deps to vendor
     depConfig.optimization ||= {};
     depConfig.optimization.splitChunks = {
-      chunks: 'all',
+      chunks: (chunk) => {
+        // mf 插件中的 chunk 的加载并不感知到 mfsu 做了 chunk 的合并, 所以还是用原来的 chunk 名去加载
+        // 这样就会造成 chunk 加载不到的问题; 因此将 mf shared 相关的 chunk 不进行合并
+        const hasShared = chunk.getModules().some((m) => {
+          return (
+            m.type === 'consume-shared-module' ||
+            m.type === 'provide-module' ||
+            m.type === 'provide-shared-module'
+          );
+        });
+        return !hasShared;
+      },
       maxInitialRequests: Infinity,
       minSize: 0,
       cacheGroups: {
@@ -175,6 +243,7 @@ export class DepBuilder {
         name: mfName,
         filename: REMOTE_FILE_FULL,
         exposes,
+        shared: this.opts.mfsu.opts.shared || {},
       }),
     );
     return depConfig;

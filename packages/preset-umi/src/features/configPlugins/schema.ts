@@ -4,6 +4,7 @@ import type { Root } from '@umijs/utils/compiled/@hapi/joi';
 
 export function getSchemas(): Record<string, (Joi: Root) => any> {
   return {
+    analyze: (Joi) => Joi.object(),
     base: (Joi) => Joi.string(),
     conventionRoutes: (Joi) =>
       Joi.object({
@@ -15,6 +16,7 @@ export function getSchemas(): Record<string, (Joi: Root) => any> {
       Joi.object({
         type: Joi.string().valid('browser', 'hash', 'memory'),
       }),
+    historyWithQuery: (Joi) => Joi.object(),
     links: (Joi) => Joi.array(),
     metas: (Joi) => Joi.array(),
     mountElementId: (Joi) => Joi.string(),
@@ -29,7 +31,10 @@ export function getSchemas(): Record<string, (Joi: Root) => any> {
     plugins: (Joi) => Joi.array().items(Joi.string()),
     presets: (Joi) => Joi.array().items(Joi.string()),
     publicPath: (Joi) =>
-      Joi.string().regex(/\/$/).error(new Error('publicPath must end with /')),
+      Joi.string()
+        .regex(/(\/|^auto)$/)
+        .error(new Error('publicPath must be "auto" or end with /')),
+    reactRouter5Compat: (Joi) => Joi.object(),
     routes: (Joi) => Joi.array().items(Joi.object()),
     scripts: (Joi) => Joi.array(),
     styles: (Joi) => Joi.array(),

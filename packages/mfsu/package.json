@@ -1,6 +1,6 @@
 {
   "name": "@umijs/mfsu",
-  "version": "4.0.6",
+  "version": "4.0.52",
   "description": "@umijs/mfsu",
   "homepage": "https://github.com/umijs/umi/tree/master/packages/mfsu#readme",
   "bugs": "https://github.com/umijs/umi/issues",
@@ -17,22 +17,23 @@
     "vendors"
   ],
   "scripts": {
-    "build": "pnpm tsc",
+    "build": "umi-scripts father build",
     "build:deps": "umi-scripts bundleDeps",
-    "dev": "pnpm build --watch",
+    "dev": "umi-scripts father dev",
     "test": "umi-scripts jest-turbo"
   },
   "dependencies": {
-    "@umijs/bundler-esbuild": "4.0.6",
-    "@umijs/bundler-utils": "4.0.6",
-    "@umijs/utils": "4.0.6",
+    "@umijs/bundler-esbuild": "4.0.52",
+    "@umijs/bundler-utils": "4.0.52",
+    "@umijs/utils": "4.0.52",
     "enhanced-resolve": "5.9.3",
     "is-equal": "^1.6.4"
   },
   "devDependencies": {
-    "mrmime": "1.0.0",
-    "webpack": "5.72.1",
-    "webpack-virtual-modules": "0.4.3"
+    "is-absolute-url": "^4.0.1",
+    "mrmime": "1.0.1",
+    "webpack": "5.75.0",
+    "webpack-virtual-modules": "0.5.0"
   },
   "publishConfig": {
     "access": "public"
@@ -42,6 +43,7 @@
   ],
   "compiledConfig": {
     "deps": [
+      "is-absolute-url",
       "mrmime",
       "webpack-virtual-modules"
     ],

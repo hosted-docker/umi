@@ -1,18 +1,12 @@
 export default {
+  model: {},
   qiankun: {
     slave: {},
   },
-  model: {},
-  headScripts: [`window.publicPath = '//localhost:8001/';`],
+  base: 'manual-slave',
   routes: [
-    { path: '/', component: 'index' },
-    { path: '/app1', component: 'app1' },
-    // { path: '/users', component: '() => { return <h1>users</h1> }' },
-    // {
-    //   path: '/users2',
-    //   component: '(() => () => { return <h1>users 2</h1> })()',
-    // },
+    { path: '/home', component: 'home' },
+    { path: '/count', component: 'count' },
+    { path: '/nav', component: 'nav' },
   ],
-  runtimePublicPath: {},
-  // history: { type: 'hash' },
 };

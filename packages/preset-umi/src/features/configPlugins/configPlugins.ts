@@ -2,7 +2,7 @@ import { getSchemas as getViteSchemas } from '@umijs/bundler-vite/dist/schema';
 import { getSchemas as getWebpackSchemas } from '@umijs/bundler-webpack/dist/schema';
 import { resolve } from '@umijs/utils';
 import { dirname, join } from 'path';
-import { IApi } from '../../types';
+import type { IApi, OnConfigChangeFn, IApiInternalProps } from '../../types';
 import { getSchemas as getExtraSchemas } from './schema';
 
 function resolveProjectDep(opts: { pkg: any; cwd: string; dep: string }) {
@@ -19,6 +19,7 @@ function resolveProjectDep(opts: { pkg: any; cwd: string; dep: string }) {
 }
 
 export default (api: IApi) => {
+  const { userConfig } = api;
   const reactDOMPath =
     resolveProjectDep({
       pkg: api.pkg,
@@ -42,18 +43,35 @@ export default (api: IApi) => {
           }
         : {}),
       'react-dom': reactDOMPath,
-      'react-router': dirname(require.resolve('react-router/package.json')),
-      'react-router-dom': dirname(
-        require.resolve('react-router-dom/package.json'),
-      ),
+      // mpa don't need to use react-router
+      ...(userConfig.mpa
+        ? {}
+        : {
+            'react-router': dirname(
+              require.resolve('react-router/package.json'),
+            ),
+            'react-router-dom': dirname(
+              require.resolve('react-router-dom/package.json'),
+            ),
+          }),
     },
-    externals: {},
+    externals: {
+      // Keep the `react-dom/client` external consistent with the `react-dom` external when react < 18.
+      // Otherwise, `react-dom/client` will still bundled in the outputs.
+      ...(isLT18 && userConfig.externals?.['react-dom']
+        ? {
+            'react-dom/client': userConfig.externals['react-dom'],
+          }
+        : {}),
+    },
     autoCSSModules: true,
     publicPath: '/',
     mountElementId: 'root',
     base: '/',
     history: { type: 'browser' },
     svgr: {},
+    ignoreMomentLocale: true,
+    mfsu: { strategy: 'eager' },
   };
 
   const bundleSchemas = api.config.vite
@@ -71,6 +89,17 @@ export default (api: IApi) => {
     if (key in configDefaults) {
       config.default = configDefaults[key];
     }
+
+    // when `routes#icon` changes, need to refresh the `appData.routes`
+    // otherwise the `icon` will not update
+    if (['routes'].includes(key)) {
+      const onRoutesChange: OnConfigChangeFn = async ({ generate }) => {
+        await (api as any as IApiInternalProps)._refreshRoutes();
+        await generate({ isFirstTime: false });
+      };
+      config.onChange = onRoutesChange;
+    }
+
     api.registerPlugins([
       {
         id: `virtual: config-${key}`,

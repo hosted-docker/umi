@@ -4,7 +4,7 @@ import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { IApi } from '../../types';
 
-export function set(api: IApi, name: string, value: any) {
+export function set(api: IApi, name: string, value: string) {
   let { mainConfigFile } = api.appData;
 
   // write empty config if config file not exists
@@ -13,6 +13,9 @@ export function set(api: IApi, name: string, value: any) {
     const content = `export default {};`;
     writeFileSync(absPath, content, 'utf-8');
     mainConfigFile = absPath;
+
+    // 需要在首次 set 时，设置 mainConfigFile 路径
+    api.appData.mainConfigFile = absPath;
   }
 
   const ast = getASTByFilePath(mainConfigFile);

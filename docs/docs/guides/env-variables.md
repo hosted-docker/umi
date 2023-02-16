@@ -50,6 +50,16 @@ PORT=4000
 
 `umi` 会以 4000 端口启动 dev server，同时保持禁用 babel 的缓存。
 
+此外 `umi` `.env` 文件中还支持变量的方式来配置环境变量。例如：
+
+```
+# file .env.local
+FOO=foo
+BAR=bar
+
+CONCAT=$FOO$BAR # CONCAT=foobar
+```
+
 注意：
 
 * 不建议将 `.env.local` 加入版本管理中。
@@ -79,6 +89,8 @@ $ ANALYZE=1 umi dev
 $ ANALYZE=1 umi build
 ```
 
+可以通过 `ANALYZE_PORT` 环境变量自定义端口或 [`analyze`](../api/config#analyze) 选项自定义配置。
+
 ### BABEL_POLYFILL
 
 默认会根据 targets 配置打目标浏览器的全量补丁，设置为 `none` 禁用内置的补丁方案。
@@ -86,6 +98,14 @@ $ ANALYZE=1 umi build
 ### COMPRESS
 
 默认压缩 CSS 和 JS，值为 none 时不压缩，build 时有效。
+
+### DID_YOU_KNOW
+
+设置为 `none` 会禁用「你知道吗」提示。
+
+### FS_LOGGER
+
+默认会开启保存物理日志，值为 none 时不保存，同时针对 webcontainer 场景（比如 stackbliz）暂不保存。
 
 ### HMR
 
@@ -104,7 +124,7 @@ $ ANALYZE=1 umi build
 指定用于 HMR 的 socket 服务器。比如：
 
 ```bash
-$ SOCKET_SERVER=https://localhost:7001/ umi dev
+$ SOCKET_SERVER=http://localhost:8000/ umi dev
 ```
 
 ### SPEED_MEASURE
@@ -114,6 +134,24 @@ $ SOCKET_SERVER=https://localhost:7001/ umi dev
 ```bash
 $ SPEED_MEASURE=JSON umi dev
 ```
+
+### UMI_ENV
+
+当指定 `UMI_ENV` 时，会额外加载指定值的配置文件，优先级为：
+
+ - `config.ts`
+
+ - `config.${UMI_ENV}.ts`
+
+ - `config.${dev | prod | test}.ts`
+
+ - `config.${dev | prod | test}.${UMI_ENV}.ts`
+
+ - `config.local.ts`
+
+若不指定 `UMI_ENV` ，则只会加载当前环境对应的配置文件，越向下的越具体，优先级更高，高优的配置可以往下移动。
+
+注：根据当前环境的不同，`dev`, `prod`, `test` 配置文件会自动加载，不能将 `UMI_ENV` 的值设定成他们。
 
 ### UMI_PLUGINS
 

@@ -10,12 +10,16 @@ export function LinkWithPrefetch(
       React.RefAttributes<HTMLAnchorElement>
   >,
 ) {
+  const { prefetch, ...linkProps } = props;
   const appData = useAppData();
-  const to = typeof props.to === 'string' ? props.to : props.to.pathname;
+  const to = typeof props.to === 'string' ? props.to : props.to?.pathname;
+  // compatible with old code
+  // which to might be undefined
+  if (!to) return null;
   return (
     <Link
-      onMouseEnter={() => props.prefetch && to && appData.preloadRoute?.(to)}
-      {...props}
+      onMouseEnter={() => prefetch && to && appData.preloadRoute?.(to)}
+      {...linkProps}
     >
       {props.children}
     </Link>

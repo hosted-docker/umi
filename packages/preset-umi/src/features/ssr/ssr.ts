@@ -1,6 +1,10 @@
-import type { Compiler } from '@umijs/bundler-webpack/compiled/webpack';
+import type {
+  Compiler,
+  Compilation,
+} from '@umijs/bundler-webpack/compiled/webpack';
 import { EnableBy } from '@umijs/core/dist/types';
 import { fsExtra, importLazy, logger } from '@umijs/utils';
+import assert from 'assert';
 import { existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { IApi } from '../../types';
@@ -14,6 +18,7 @@ export default (api: IApi) => {
         return Joi.object({
           serverBuildPath: Joi.string(),
           platform: Joi.string(),
+          builder: Joi.string().allow('esbuild', 'webpack'),
         });
       },
     },
@@ -34,10 +39,11 @@ export default (api: IApi) => {
     logger.warn(`SSR feature is in beta, may be unstable`);
   });
 
-  api.addBeforeMiddlewares(() => [
+  api.addMiddlewares(() => [
     async (req, res, next) => {
       const modulePath = absServerBuildPath(api);
       if (existsSync(modulePath)) {
+        delete require.cache[modulePath];
         (await require(modulePath)).default(req, res, next);
       } else {
         // TODO: IMPROVEMENT: use Umi Animation
@@ -58,14 +64,28 @@ export { React };
     });
   });
 
-  api.onBeforeCompiler(async () => {
-    const { build }: typeof import('./builder/builder') = importLazy(
-      require.resolve('./builder/builder'),
-    );
-    await build({
-      api,
-      watch: api.env === 'development',
-    });
+  api.onBeforeCompiler(async ({ opts }) => {
+    const { builder = 'esbuild' } = api.config.ssr;
+
+    if (builder === 'esbuild') {
+      const { build }: typeof import('./builder/builder') = importLazy(
+        require.resolve('./builder/builder'),
+      );
+      await build({
+        api,
+        watch: api.env === 'development',
+      });
+    } else if (builder === 'webpack') {
+      assert(
+        !api.config.vite,
+        `The \`vite\` config is now allowed when \`ssr.builder\` is webpack!`,
+      );
+
+      const { build }: typeof import('./webpack/webpack') = importLazy(
+        require.resolve('./webpack/webpack'),
+      );
+      await build(api, opts);
+    }
   });
 
   // 在 webpack 完成打包以后，使用 esbuild 编译 umi.server.js
@@ -100,7 +120,7 @@ export default function handler(request, response) {
   const pluginName = 'ProcessAssetsPlugin';
   class ProcessAssetsPlugin {
     apply(compiler: Compiler) {
-      compiler.hooks.compilation.tap(pluginName, (compilation) => {
+      compiler.hooks.compilation.tap(pluginName, (compilation: Compilation) => {
         compilation.hooks.afterProcessAssets.tap(pluginName, () => {
           const modulePath = absServerBuildPath(api);
           delete require.cache[modulePath];

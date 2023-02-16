@@ -45,8 +45,19 @@ export async function getMarkup(
     filters?: string[];
   }) {
     return Object.keys(opts.props)
-      .filter((key) => !(opts.filters || []).includes(key))
-      .map((key) => `${key}=${JSON.stringify(opts.props[key])}`)
+      .filter((key) => {
+        const isValidBoolean = opts.props[key] !== false;
+        return !(opts.filters || []).includes(key) && isValidBoolean;
+      })
+      .map((key) => {
+        const value = opts.props[key];
+        // Although not has value, it will still output `key=""` after cheerio parsed
+        // https://github.com/cheeriojs/cheerio/issues/1032
+        if (value === true) {
+          return `${key}`;
+        }
+        return `${key}=${JSON.stringify(value)}`;
+      })
       .join(' ');
   }
 
@@ -55,11 +66,14 @@ export async function getMarkup(
       props: script,
       filters: ['src', 'content'],
     });
+    // allow specific type from config
+    const isEsmScript = opts.esmScript && !('type' in script);
+
     return script.src
-      ? `<script${opts.esmScript ? ' type="module"' : ''} ${attrs} src="${
+      ? `<script${isEsmScript ? ' type="module"' : ''} ${attrs} src="${
           script.src
         }"></script>`
-      : `<script${opts.esmScript ? ' type="module"' : ''} ${attrs}>${
+      : `<script${isEsmScript ? ' type="module"' : ''} ${attrs}>${
           script.content
         }</script>`;
   }
@@ -84,6 +98,26 @@ export async function getMarkup(
     return `<${opts.tagName} ${attrs} />`;
   }
 
+  function withDefaultMetas(metas: IOpts['metas'] = []) {
+    const hasAttr = (key: string, value?: string) =>
+      metas.some((m) => {
+        return value ? m[key]?.toLowerCase() === value.toLowerCase() : m[key];
+      });
+    return [
+      !hasAttr('charset') && { charset: 'utf-8' },
+      !hasAttr('name', 'viewport') && {
+        name: 'viewport',
+        content:
+          'width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0',
+      },
+      !hasAttr('http-equiv', 'X-UA-Compatible') && {
+        'http-equiv': 'X-UA-Compatible',
+        content: 'ie=edge',
+      },
+      ...metas,
+    ].filter(Boolean) as NonNullable<IOpts['metas']>;
+  }
+
   const favicons: string[] = [];
   if (Array.isArray(opts.favicons)) {
     opts.favicons.forEach((e) => {
@@ -91,7 +125,7 @@ export async function getMarkup(
     });
   }
   const title = opts.title ? `<title>${opts.title}</title>` : '';
-  const metas = (opts.metas || []).map((meta) =>
+  const metas = withDefaultMetas(opts.metas).map((meta) =>
     getTagContent({ attrs: meta, tagName: 'meta' }),
   );
   const links = (opts.links || []).map((link) =>
@@ -105,13 +139,7 @@ export async function getMarkup(
   markup = [
     `<!DOCTYPE html>
 <html>
-<head>
-<meta charset="UTF-8" />
-<meta
-  name="viewport"
-  content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0"
-/>
-<meta http-equiv="X-UA-Compatible" content="ie=edge" />`,
+<head>`,
     metas.join('\n'),
     favicons.join('\n'),
     title,

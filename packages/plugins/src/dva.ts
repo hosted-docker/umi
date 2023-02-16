@@ -1,7 +1,7 @@
 import * as t from '@umijs/bundler-utils/compiled/babel/types';
 import { winPath } from '@umijs/utils';
 import { join, relative } from 'path';
-import { IApi } from 'umi';
+import { IApi, RUNTIME_TYPE_FILE_NAME } from 'umi';
 import { chalk } from 'umi/plugin-utils';
 import { Model, ModelUtils } from './utils/modelUtils';
 import { withTmpPath } from './utils/withTmpPath';
@@ -12,10 +12,14 @@ export default (api: IApi) => {
   api.describe({
     config: {
       schema(Joi) {
-        return Joi.object({
-          extraModels: Joi.array().items(Joi.string()),
-          immer: Joi.object(),
-        });
+        return Joi.alternatives().try(
+          Joi.object({
+            extraModels: Joi.array().items(Joi.string()),
+            immer: Joi.object(),
+            skipModelValidate: Joi.boolean(),
+          }),
+          Joi.boolean().invalid(true),
+        );
       },
     },
     enableBy: api.EnableBy.config,
@@ -47,6 +51,28 @@ export default (api: IApi) => {
       content: ModelUtils.getModelsContent(models),
     });
 
+    api.writeTmpFile({
+      path: RUNTIME_TYPE_FILE_NAME,
+      content: `
+export interface IRuntimeConfig {
+  dva?: {
+    config?: {
+        initialState?: Record<string, any>;
+        onError?: any;
+        onStateChange?: any;
+        onAction?: any;
+        onHmr?: any;
+        onReducer?: any;
+        onEffect?: any;
+        extraReducers?: any;
+        extraEnhancers?: any;
+        [key: string]: any;
+    },
+    plugins?: string[];
+  }
+}
+      `,
+    });
     // dva.tsx
     api.writeTmpFile({
       path: 'dva.tsx',
@@ -141,6 +167,70 @@ export { connect, useDispatch, useStore, useSelector } from 'dva';
 export { getDvaApp } from './dva';
 `,
     });
+
+    // types.ts
+    api.writeTmpFile({
+      path: 'types.d.ts',
+      tpl: `
+import type { History } from 'umi';
+
+export interface ConnectProps {
+      dispatch?: Dispatch;
+}
+type RequiredConnectProps = Required<ConnectProps>
+export type ConnectRC<
+      T = {},
+      > = React.ForwardRefRenderFunction<any, T & RequiredConnectProps>;
+interface Action<T = any> {
+      type: T
+}
+interface AnyAction extends Action {
+      // Allows any extra properties to be defined in an action.
+      [extraProps: string]: any
+}
+interface Dispatch<A extends Action = AnyAction> {
+      <T extends A>(action: T): T
+}
+interface EffectsCommandMap {
+      put: <A extends AnyAction>(action: A) => any,
+      call: Function,
+      select: Function,
+      take: Function,
+      cancel: Function,
+      [key: string]: any,
+}
+interface Action<T = any> {
+      type: T
+}
+export type Reducer<S = any, A extends Action = AnyAction> = (prevState: S, action: A) => S;
+export type Effect = (action: AnyAction, effects: EffectsCommandMap) => void;
+type EffectType = 'takeEvery' | 'takeLatest' | 'watcher' | 'throttle';
+type EffectWithType = [Effect, { type: EffectType }];
+export type Subscription = (api: SubscriptionAPI, done: Function) => void;
+
+export interface ReducersMapObject<T> {
+      [key: string]: Reducer<T>,
+}
+export interface EffectsMapObject {
+      [key: string]: Effect | EffectWithType,
+}
+export interface SubscriptionAPI {
+      dispatch: Dispatch<any>,
+      history: History,
+}
+export interface SubscriptionsMapObject {
+      [key: string]: Subscription,
+}
+export interface DvaModel<T, E = EffectsMapObject, R = ReducersMapObject<T>> {
+      namespace: string,
+      state?: T,
+      reducers?: R,
+      effects?: E,
+      subscriptions?: SubscriptionsMapObject,
+}
+      `,
+      context: {},
+    });
   });
 
   api.addTmpGenerateWatcherPaths(() => {
@@ -168,6 +258,7 @@ export { getDvaApp } from './dva';
 export function getModelUtil(api: IApi | null) {
   return new ModelUtils(api, {
     contentTest(content) {
+      if (api?.config.dva.skipModelValidate) return true;
       return content.startsWith('// @dva-model');
     },
     astTest({ node, content }) {

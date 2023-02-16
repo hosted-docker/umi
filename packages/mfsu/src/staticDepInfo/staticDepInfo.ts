@@ -22,6 +22,9 @@ type MergedCodeInfo = {
 type AutoUpdateSrcCodeCache = {
   register(listener: (info: MergedCodeInfo) => void): void;
   getMergedCode(): MergedCodeInfo;
+  handleFileChangeEvents(events: FileChangeEvent[]): void;
+  replayChangeEvents(): FileChangeEvent[];
+  getSrcPath(): string;
 };
 
 interface IOpts {
@@ -35,13 +38,14 @@ export type Match = ReturnType<typeof checkMatch> & { version: string };
 type Matched = Record<string, Match>;
 
 export class StaticDepInfo {
-  private opts: IOpts;
+  public opts: IOpts;
   private readonly cacheFilePath: string;
 
   private mfsu: MFSU;
   private readonly include: string[];
   private currentDep: Record<string, Match> = {};
   private builtWithDep: Record<string, Match> = {};
+  private cacheDependency: object = {};
 
   private produced: { changes: unknown[] }[] = [];
   private readonly cwd: string;
@@ -73,28 +77,10 @@ export class StaticDepInfo {
     this.cwd = this.mfsu.opts.cwd!;
 
     opts.srcCodeCache.register((info) => {
-      this.produced.push({ changes: info.events });
       this.currentDep = this._getDependencies(info.code, info.imports);
     });
 
-    this.runtimeSimulations = [
-      {
-        packageName: 'antd',
-        handleImports: createPluginImport({
-          libraryName: 'antd',
-          style: true,
-          libraryDirectory: 'es',
-        }),
-      },
-      {
-        packageName: '@alipay/bigfish/antd',
-        handleImports: createPluginImport({
-          libraryName: '@alipay/bigfish/antd',
-          style: true,
-          libraryDirectory: 'es',
-        }),
-      },
-    ];
+    this.runtimeSimulations = [];
   }
 
   getProducedEvent() {
@@ -106,6 +92,20 @@ export class StaticDepInfo {
   }
 
   shouldBuild() {
+    const currentCacheDep = this.opts.mfsu.opts.getCacheDependency!();
+
+    if (!lodash.isEqual(this.cacheDependency, currentCacheDep)) {
+      if (process.env.DEBUG_UMI) {
+        const reason = why(this.cacheDependency, currentCacheDep);
+        logger.info(
+          '[MFSU][eager]: isEqual(cacheDependency,currentCacheDep) === false, because ',
+          reason,
+        );
+      }
+
+      return 'cacheDependency has changed';
+    }
+
     if (lodash.isEqual(this.builtWithDep, this.currentDep)) {
       return false;
     } else {
@@ -137,18 +137,38 @@ export class StaticDepInfo {
 
   snapshot() {
     this.builtWithDep = this.currentDep;
+    this.cacheDependency = this.mfsu.opts.getCacheDependency!();
   }
 
   loadCache() {
     if (existsSync(this.cacheFilePath)) {
-      this.builtWithDep = JSON.parse(readFileSync(this.cacheFilePath, 'utf-8'));
-      logger.info('[MFSU][eager] restored cache');
+      try {
+        const { dep = {}, cacheDependency = {} } = JSON.parse(
+          readFileSync(this.cacheFilePath, 'utf-8'),
+        );
+
+        this.builtWithDep = dep;
+        this.cacheDependency = cacheDependency;
+        logger.info('[MFSU][eager] restored cache');
+      } catch (e) {
+        logger.warn(
+          '[MFSU][eager] restore cache failed, fallback to Empty dependency',
+          e,
+        );
+      }
     }
   }
 
   writeCache() {
     fsExtra.mkdirpSync(dirname(this.cacheFilePath));
-    const newContent = JSON.stringify(this.builtWithDep, null, 2);
+    const newContent = JSON.stringify(
+      {
+        dep: this.builtWithDep,
+        cacheDependency: this.cacheDependency,
+      },
+      null,
+      2,
+    );
     if (
       existsSync(this.cacheFilePath) &&
       readFileSync(this.cacheFilePath, 'utf-8') === newContent
@@ -181,9 +201,22 @@ export class StaticDepInfo {
 
     const cwd = this.mfsu.opts.cwd!;
 
+    const mfsuOpts = this.mfsu.opts;
+    const userUnMatches = mfsuOpts.unMatchLibs || [];
+    const sharedUnMatches = Object.keys(mfsuOpts.shared || {});
+    const remoteAliasUnMatches = (mfsuOpts.remoteAliases || []).map(
+      (str) => new RegExp(`^${str}`),
+    );
+
+    const unMatches = [
+      ...userUnMatches,
+      ...sharedUnMatches,
+      ...remoteAliasUnMatches,
+    ];
+
     const opts = {
       exportAllMembers: this.mfsu.opts.exportAllMembers,
-      unMatchLibs: this.mfsu.opts.unMatchLibs,
+      unMatchLibs: unMatches,
       remoteName: this.mfsu.opts.mfName,
       alias: this.mfsu.alias,
       externals: this.mfsu.externals,
@@ -198,6 +231,11 @@ export class StaticDepInfo {
     const groupedMockImports: Record<string, ImportSpecifier[]> = {};
 
     for (const imp of imports) {
+      // when import('base/${comp}')
+      if (!imp.n) {
+        continue;
+      }
+
       if (pkgNames.indexOf(imp.n!) >= 0) {
         const name = imp.n!;
         if (groupedMockImports[name]) {
@@ -295,5 +333,14 @@ export class StaticDepInfo {
 
   async allRuntimeHelpers() {
     // todo mfsu4
+  }
+
+  setBabelPluginImportConfig(config: Map<string, any>) {
+    for (const [key, c] of config.entries()) {
+      this.runtimeSimulations.push({
+        packageName: key,
+        handleImports: createPluginImport(c),
+      });
+    }
   }
 }

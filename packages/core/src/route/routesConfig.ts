@@ -54,7 +54,9 @@ function transformRoute(opts: {
     const parentAbsPath = opts.parentId
       ? opts.memo.ret[opts.parentId].absPath.replace(/\/+$/, '/') // to remove '/'s on the tail
       : '/';
-    absPath = parentAbsPath + absPath;
+    absPath = endsWithStar(parentAbsPath)
+      ? parentAbsPath
+      : ensureWithSlash(parentAbsPath, absPath);
   }
   opts.memo.ret[id] = {
     ...routeProps,
@@ -75,18 +77,26 @@ function transformRoute(opts: {
   if (wrappers?.length) {
     let parentId = opts.parentId;
     let path = opts.route.path;
+    let layout = opts.route.layout;
     wrappers.forEach((wrapper: any) => {
       const { id } = transformRoute({
-        route: { path, component: wrapper },
+        route: {
+          path,
+          component: wrapper,
+          isWrapper: true,
+          ...(layout === false ? { layout: false } : {}),
+        },
         parentId,
         memo: opts.memo,
         onResolveComponent: opts.onResolveComponent,
       });
       parentId = id;
-      path = '';
+      path = endsWithStar(path) ? '*' : '';
     });
     opts.memo.ret[id].parentId = parentId;
     opts.memo.ret[id].path = path;
+    // wrapper 处理后 真实 path 为空, 存储原 path 为 originPath 方便 layout 渲染
+    opts.memo.ret[id].originPath = opts.route.path;
   }
   if (opts.route.routes) {
     transformRoutes({
@@ -97,4 +107,16 @@ function transformRoute(opts: {
     });
   }
   return { id };
+}
+
+function endsWithStar(str: string) {
+  return str.endsWith('*');
+}
+
+function ensureWithSlash(left: string, right: string) {
+  // right path maybe empty
+  if (!right?.length || right === '/') {
+    return left;
+  }
+  return `${left.replace(/\/+$/, '')}/${right.replace(/^\/+/, '')}`;
 }

@@ -25,7 +25,7 @@ export default (api: IApi) => {
   });
 
   api.modifyAppData(async (memo) => {
-    if (api.config.favicon) return memo;
+    if (api.config.favicons) return memo;
     const faviconFiles = getFaviconFiles(api.paths.absSrcPath);
     if (faviconFiles) {
       memo.faviconFiles = faviconFiles;
@@ -36,7 +36,7 @@ export default (api: IApi) => {
   api.addBeforeMiddlewares(() => [
     (req, res, next) => {
       const iconFile = (api.appData.faviconFiles || []).find(
-        (file: any) => req.path === `/${file}`,
+        (file: any) => req.path === `${api.config.publicPath}${file}`,
       );
       if (!iconFile) {
         next();

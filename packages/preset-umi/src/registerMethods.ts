@@ -1,11 +1,10 @@
 import { init } from '@umijs/bundler-utils/compiled/es-module-lexer';
-import { fsExtra, lodash, Mustache } from '@umijs/utils';
+import { fsExtra, importLazy, lodash, Mustache } from '@umijs/utils';
 import assert from 'assert';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { IApi } from './types';
 import { isTypeScriptFile } from './utils/isTypeScriptFile';
-import transformIEAR from './utils/transformIEAR';
 
 export default (api: IApi) => {
   [
@@ -14,22 +13,21 @@ export default (api: IApi) => {
     'onBuildComplete',
     'onBuildHtmlComplete',
     'onPatchRoute',
-    // 'onPatchRouteBefore',
-    // 'onPatchRoutes',
-    // 'onPatchRoutesBefore',
-    'onPkgJSONChanged', // new
+    'onPkgJSONChanged',
+    'onPrepareBuildSuccess',
     'onDevCompileDone',
     'onCheckPkgJSON',
     'onCheckCode',
     'onCheckConfig',
+    'onBeforeMiddleware',
     'addBeforeMiddlewares',
     'addLayouts',
     'addMiddlewares',
     'addApiMiddlewares',
     'addRuntimePlugin',
     'addRuntimePluginKey',
-    // 'addUmiExports',
     'addPolyfillImports',
+    'addPrepareBuildPlugins',
     'addEntryImportsAhead',
     'addEntryImports',
     'addEntryCodeAhead',
@@ -44,17 +42,18 @@ export default (api: IApi) => {
     'addHTMLHeadScripts',
     'addHTMLScripts',
     'addTmpGenerateWatcherPaths',
+    'addOnDemandDeps',
     'chainWebpack',
+    'modifyEntry',
     'modifyHTMLFavicon',
     'modifyHTML',
+    'modifyExportHTMLFiles',
     'modifyWebpackConfig',
     'modifyViteConfig',
-    // 'modifyHTMLChunks',
-    // 'modifyExportRouteMap',
-    // 'modifyPublicPathStr',
     'modifyRendererPath',
     'modifyServerRendererPath',
     'modifyRoutes',
+    'modifyBabelPresetOpts',
   ].forEach((name) => {
     api.registerMethod({ name });
   });
@@ -117,18 +116,21 @@ export default (api: IApi) => {
 
       // transform imports for all javascript-like files only vite mode enable
       if (api.appData.vite && isJsFile) {
+        const { default: transformIEAR } = importLazy(
+          require.resolve('./utils/transformIEAR'),
+        );
         content = transformIEAR({ content, path: absPath }, api);
       }
 
       if (!existsSync(absPath)) {
-        writeFileSync(absPath, content, 'utf-8');
+        writeFileSync(absPath, content!, 'utf-8');
       } else {
         const fileContent = readFileSync(absPath, 'utf-8');
 
         if (fileContent.startsWith('// debug') || fileContent === content) {
           return;
         } else {
-          writeFileSync(absPath, content, 'utf-8');
+          writeFileSync(absPath, content!, 'utf-8');
         }
       }
     },

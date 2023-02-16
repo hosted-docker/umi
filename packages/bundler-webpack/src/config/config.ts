@@ -1,3 +1,5 @@
+import CaseSensitivePaths from '@umijs/case-sensitive-paths-webpack-plugin';
+import { logger, resolve as resolveModule } from '@umijs/utils';
 import { join, resolve } from 'path';
 import webpack, { Configuration } from '../../compiled/webpack';
 import Config from '../../compiled/webpack-5-chain';
@@ -36,7 +38,7 @@ export interface IOpts {
   entry: Record<string, string>;
   extraBabelPresets?: any[];
   extraBabelPlugins?: any[];
-  extraBabelIncludes?: string[];
+  extraBabelIncludes?: Array<string | RegExp>;
   extraEsbuildLoaderHandler?: any[];
   babelPreset?: any;
   chainWebpack?: Function;
@@ -52,6 +54,8 @@ export interface IOpts {
     buildDependencies?: string[];
     cacheDirectory?: string;
   };
+  pkg?: Record<string, any>;
+  disableCopy?: boolean;
 }
 
 export async function getConfig(opts: IOpts): Promise<Configuration> {
@@ -78,6 +82,9 @@ export async function getConfig(opts: IOpts): Promise<Configuration> {
     staticPathPrefix:
       opts.staticPathPrefix !== undefined ? opts.staticPathPrefix : 'static/',
   };
+
+  // name
+  config.name(opts.name);
 
   // mode
   config.mode(opts.env);
@@ -118,7 +125,8 @@ export async function getConfig(opts: IOpts): Promise<Configuration> {
     .set(
       'assetModuleFilename',
       `${applyOpts.staticPathPrefix}[name].[hash:8][ext]`,
-    );
+    )
+    .set('hashFunction', 'xxhash64'); // https://github.com/webpack/webpack/issues/14532#issuecomment-947525539
 
   // resolve
   // prettier-ignore
@@ -132,13 +140,14 @@ export async function getConfig(opts: IOpts): Promise<Configuration> {
       .end()
     .extensions
       .merge([
-        '.wasm',
-        '.mjs',
-        '.js',
-        '.jsx',
         '.ts',
         '.tsx',
-        '.json'
+        '.js',
+        '.jsx',
+        '.mjs',
+        '.cjs',
+        '.json',
+        '.wasm'
       ])
       .end();
 
@@ -179,7 +188,9 @@ export async function getConfig(opts: IOpts): Promise<Configuration> {
   // fork-ts-checker
   await addForkTSCheckerPlugin(applyOpts);
   // copy
-  await addCopyPlugin(applyOpts);
+  if (!opts.disableCopy) {
+    await addCopyPlugin(applyOpts);
+  }
   // manifest
   await addManifestPlugin(applyOpts);
   // hmr
@@ -201,6 +212,8 @@ export async function getConfig(opts: IOpts): Promise<Configuration> {
   if (userConfig.runtimePublicPath) {
     config.plugin('runtimePublicPath').use(RuntimePublicPathPlugin);
   }
+  // case-sensitive-paths
+  config.plugin('case-sensitive-paths').use(CaseSensitivePaths);
 
   // cache
   if (opts.cache) {
@@ -230,10 +243,41 @@ export async function getConfig(opts: IOpts): Promise<Configuration> {
       const nodeModulesPath =
         opts.cache.absNodeModulesPath ||
         join(opts.rootDir || opts.cwd, 'node_modules');
+      // 寻找本地 link 的 node_modules 目录，避免 NPM 包 link 场景下导致缓存生成 OOM
+      const localLinkedNodeModules = Object.keys(
+        Object.assign(
+          {},
+          opts.pkg?.dependencies,
+          opts.pkg?.peerDependencies,
+          opts.pkg?.devDependencies,
+        ),
+      )
+        .map((pkg: string) => {
+          try {
+            return resolve(
+              resolveModule.sync(`${pkg}/package.json`, {
+                basedir: opts.rootDir || opts.cwd,
+                preserveSymlinks: false,
+              }),
+              '../node_modules',
+            );
+          } catch {
+            // will be filtered below
+            return opts.rootDir || opts.cwd;
+          }
+        })
+        .filter((pkg: string) => !pkg.startsWith(opts.rootDir || opts.cwd));
+
+      if (localLinkedNodeModules.length) {
+        logger.info(
+          `Detected local linked tnpm node_modules, to avoid oom, they will be treated as immutablePaths & managedPaths in webpack snapshot:`,
+        );
+        localLinkedNodeModules.forEach((p) => logger.info(`  ${p}`));
+      }
 
       config.snapshot({
-        immutablePaths: [nodeModulesPath],
-        managedPaths: [nodeModulesPath],
+        immutablePaths: [nodeModulesPath, ...localLinkedNodeModules],
+        managedPaths: [nodeModulesPath, ...localLinkedNodeModules],
       });
     }
 
@@ -269,7 +313,6 @@ export async function getConfig(opts: IOpts): Promise<Configuration> {
   let webpackConfig = config.toConfig();
 
   // speed measure
-  // TODO: mini-css-extract-plugin 报错
   webpackConfig = await addSpeedMeasureWebpackPlugin({
     webpackConfig,
   });

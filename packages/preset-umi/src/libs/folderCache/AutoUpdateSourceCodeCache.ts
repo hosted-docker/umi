@@ -4,15 +4,14 @@ import {
   parse,
 } from '@umijs/bundler-utils/compiled/es-module-lexer';
 import { build as esBuild } from '@umijs/bundler-utils/compiled/esbuild';
-import { logger } from '@umijs/utils';
+import { logger, winPath } from '@umijs/utils';
 // @ts-ignore
 import fg from 'fast-glob';
 import { readFileSync } from 'fs';
 import { extname, join, relative } from 'path';
-import {
-  AutoUpdateFolderCache,
-  FileChangeEvent,
-} from './AutoUpdateFolderCache';
+import { AutoUpdateFolderCache } from './AutoUpdateFolderCache';
+import type { FileChangeEvent } from './types';
+import { DEFAULT_SRC_IGNORES } from './constant';
 
 export type MergedCodeInfo = {
   code: string;
@@ -28,6 +27,8 @@ export class AutoUpdateSrcCodeCache {
   folderCache: AutoUpdateFolderCache;
   private listeners: Listener[] = [];
 
+  private ignores: string[] = DEFAULT_SRC_IGNORES;
+
   constructor(opts: { cwd: string; cachePath: string }) {
     this.srcPath = opts.cwd;
     this.cachePath = opts.cachePath;
@@ -35,15 +36,8 @@ export class AutoUpdateSrcCodeCache {
     this.folderCache = new AutoUpdateFolderCache({
       cwd: this.srcPath,
       exts: ['ts', 'js', 'jsx', 'tsx'],
-      ignored: [
-        '**/*.d.ts',
-        '**/*.test.{js,ts,jsx,tsx}',
-        // fixme respect to environment
-        '**/.umi-production/**',
-        '**/node_modules/**',
-        '**/.git/**',
-      ],
-      debouncedTimeout: 500,
+      ignored: this.ignores,
+      debouncedTimeout: 200,
       filesLoader: async (files: string[]) => {
         const loaded: Record<string, string> = {};
         await this.batchProcess(files);
@@ -51,8 +45,7 @@ export class AutoUpdateSrcCodeCache {
         for (const f of files) {
           let newFile = join(this.cachePath, relative(this.srcPath, f));
 
-          // fixme ensure the last one
-          newFile = newFile.replace(extname(newFile), '.js');
+          newFile = newFile.replace(new RegExp(`${extname(newFile)}$`), '.js');
 
           loaded[f] = readFileSync(newFile, 'utf-8');
         }
@@ -75,17 +68,13 @@ export class AutoUpdateSrcCodeCache {
 
   private async initFileList(): Promise<string[]> {
     const start = Date.now();
-    const files = await fg(join(this.srcPath, '**', '*.{ts,js,jsx,tsx}'), {
-      dot: true,
-      ignore: [
-        '**/*.d.ts',
-        '**/*.test.{js,ts,jsx,tsx}',
-        // fixme respect to environment
-        '**/.umi-production/**',
-        '**/node_modules/**',
-        '**/.git/**',
-      ],
-    });
+    const files = await fg(
+      winPath(join(this.srcPath, '**', '*.{ts,js,jsx,tsx}')),
+      {
+        dot: true,
+        ignore: this.ignores,
+      },
+    );
     logger.debug('[MFSU][eager] fast-glob costs', Date.now() - start);
 
     return files;
@@ -100,9 +89,10 @@ export class AutoUpdateSrcCodeCache {
         outbase: this.srcPath,
         loader: {
           // in case some js using some feature, eg: decorator
+          '.js': 'tsx',
           '.jsx': 'tsx',
         },
-        logLevel: 'silent',
+        logLevel: 'error',
       });
     } catch (e) {
       // error ignored due to user have to update code to fix then trigger another batchProcess;
@@ -111,7 +101,7 @@ export class AutoUpdateSrcCodeCache {
         logger.warn(
           'transpile code with esbuild got ',
           // @ts-ignore
-          e.errors?.lenght || 0,
+          e.errors?.length || 0,
           'errors,',
           // @ts-ignore
           e.warnings?.length || 0,

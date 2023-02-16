@@ -2,6 +2,7 @@
   "name": "@example/lint",
   "private": true,
   "scripts": {
+    "dev": "umi dev",
     "lint": "umi lint",
     "lint:cssinjs": "umi lint --stylelint-only --cssinjs",
     "lint:es": "umi lint --eslint-only",
@@ -12,8 +13,8 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "eslint": "^8.15.0",
+    "eslint": "^8.31.0",
     "stylelint": "^14.8.2",
-    "umi": "4.0.6"
+    "umi": "4.0.52"
   }
 }

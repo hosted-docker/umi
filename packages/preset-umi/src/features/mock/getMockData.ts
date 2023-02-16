@@ -1,6 +1,7 @@
 import esbuild from '@umijs/bundler-utils/compiled/esbuild';
 import { chalk, glob, lodash, logger, register } from '@umijs/utils';
 import assert from 'assert';
+import { join } from 'path';
 import { DEFAULT_METHOD, MOCK_FILE_GLOB, VALID_METHODS } from './constants';
 
 export interface IMock {
@@ -35,13 +36,15 @@ export function getMockData(opts: {
       return memo;
     }, [])
     .reduce<Record<string, any>>((memo, file) => {
-      const mockFile = `${opts.cwd}/${file}`;
+      const mockFile = join(opts.cwd, file);
       let m;
       try {
+        delete require.cache[mockFile];
         m = require(mockFile);
       } catch (e) {
         throw new Error(
           `Mock file ${mockFile} parse failed.\n${(e as Error).message}`,
+          { cause: e },
         );
       }
       // Cannot convert undefined or null to object

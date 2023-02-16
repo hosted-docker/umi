@@ -1,16 +1,52 @@
-import * as allIcons from '@ant-design/icons';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
-import { IApi } from 'umi';
+import { IApi, RUNTIME_TYPE_FILE_NAME } from 'umi';
 import { lodash, Mustache, winPath } from 'umi/plugin-utils';
+import { resolveProjectDep } from './utils/resolveProjectDep';
 import { withTmpPath } from './utils/withTmpPath';
 
+// 获取所有 icons
+const antIconsPath = winPath(
+  dirname(require.resolve('@ant-design/icons/package')),
+);
+
+const getAllIcons = () => {
+  // 读取 index.d.ts
+  const iconTypePath = join(antIconsPath, './lib/icons/index.d.ts');
+  const iconTypeContent = readFileSync(iconTypePath, 'utf-8');
+
+  // 截取 default as ${iconName}, 然后获取 iconName 转换为 map
+  return [...iconTypeContent.matchAll(/default as (\w+)/g)].reduce(
+    (memo: Record<string, boolean>, cur) => {
+      memo[cur[1]] = true;
+      return memo;
+    },
+    {},
+  );
+};
+
+const allIcons: Record<string, boolean> = getAllIcons();
+
 export default (api: IApi) => {
+  let antdVersion = '4.0.0';
+  try {
+    const pkgPath =
+      resolveProjectDep({
+        pkg: api.pkg,
+        cwd: api.cwd,
+        dep: 'antd',
+      }) || dirname(require.resolve('antd/package.json'));
+    antdVersion = require(`${pkgPath}/package.json`).version;
+  } catch (e) {}
+
   api.describe({
     key: 'layout',
     config: {
-      schema(joi) {
-        return joi.object();
+      schema(Joi) {
+        return Joi.alternatives().try(
+          Joi.object(),
+          Joi.boolean().invalid(true),
+        );
       },
       onChange: api.ConfigChangeType.regenerateTmpFiles,
     },
@@ -18,9 +54,13 @@ export default (api: IApi) => {
   });
 
   /**
-   * 优先去找 '@alipay/tech-ui'，保证稳定性
+   * 优先去找 '@alipay/tech-ui'，内部项目优先
    */
-  const depList = ['@alipay/tech-ui', '@ant-design/pro-layout'];
+  const depList = [
+    '@alipay/tech-ui',
+    '@ant-design/pro-components',
+    '@ant-design/pro-layout',
+  ];
 
   const pkgHasDep = depList.find((dep) => {
     const { pkg } = api;
@@ -31,7 +71,7 @@ export default (api: IApi) => {
   });
 
   const getPkgPath = () => {
-    // 如果 layout 和 techui 至少有一个在，找到他们的地址
+    // 如果techui， components 和 layout 至少有一个在，找到他们的地址
     if (
       pkgHasDep &&
       existsSync(join(api.cwd, 'node_modules', pkgHasDep, 'package.json'))
@@ -47,8 +87,8 @@ export default (api: IApi) => {
     ) {
       return join(cwd, 'node_modules', pkgHasDep);
     }
-    // 如果项目中没有去找插件以来的
-    return dirname(require.resolve('@ant-design/pro-layout/package.json'));
+    // 如果项目中没有去找插件依赖的
+    return dirname(require.resolve('@ant-design/pro-components/package.json'));
   };
 
   const pkgPath = winPath(getPkgPath());
@@ -63,26 +103,32 @@ export default (api: IApi) => {
   });
 
   api.modifyConfig((memo) => {
-    // 只在没有自行依赖 @ant-design/pro-layout 或 @alipay/tech-ui 时
-    // 才使用插件中提供的 @ant-design/pro-layout
+    // 只在没有自行依赖 @ant-design/pro-components 或 @alipay/tech-ui 时
+    // 才使用插件中提供的 @ant-design/pro-components
     if (!pkgHasDep) {
-      memo.alias['@ant-design/pro-layout'] = pkgPath;
+      // 寻找到什么就用什么，在 '@alipay/tech-ui','@ant-design/pro-components','@ant-design/pro-layout' 中寻找
+      const name = require(`${pkgPath}/package.json`).name;
+      memo.alias[name] = pkgPath;
     }
     return memo;
   });
 
   api.onGenerateFiles(() => {
+    const PKG_TYPE_REFERENCE = `/// <reference types="${
+      pkgPath || '@ant-design/pro-components'
+    }" />`;
     const hasInitialStatePlugin = api.config.initialState;
     // Layout.tsx
     api.writeTmpFile({
       path: 'Layout.tsx',
       content: `
+${PKG_TYPE_REFERENCE}
 import { Link, useLocation, useNavigate, Outlet, useAppData, useRouteData, matchRoutes } from 'umi';
 import type { IRoute } from 'umi';
 import React, { useMemo } from 'react';
 import {
   ProLayout,
-} from "${pkgPath || '@ant-design/pro-layout'}";
+} from "${pkgPath || '@ant-design/pro-components'}";
 import './Layout.less';
 import Logo from './Logo';
 import Exception from './Exception';
@@ -115,19 +161,45 @@ const filterRoutes = (routes: IRoute[], filterFn: (route: IRoute) => boolean) =>
 
   let newRoutes = []
   for (const route of routes) {
+    const newRoute = {...route };
     if (filterFn(route)) {
-      if (Array.isArray(route.routes)) {
-        newRoutes.push(...filterRoutes(route.routes, filterFn))
+      if (Array.isArray(newRoute.routes)) {
+        newRoutes.push(...filterRoutes(newRoute.routes, filterFn))
       }
     } else {
-      newRoutes.push(route);
-      if (Array.isArray(route.routes)) {
-        route.routes = filterRoutes(route.routes, filterFn);
+      if (Array.isArray(newRoute.children)) {
+        newRoute.children = filterRoutes(newRoute.children, filterFn);
+        newRoute.routes = newRoute.children;
       }
+      newRoutes.push(newRoute);
     }
   }
 
   return newRoutes;
+}
+
+// 格式化路由 处理因 wrapper 导致的 菜单 path 不一致
+const mapRoutes = (routes: IRoute[]) => {
+  if (routes.length === 0) {
+    return []
+  }
+  return routes.map(route => {
+    // 需要 copy 一份, 否则会污染原始数据
+    const newRoute = {...route}
+    if (route.originPath) {
+      newRoute.path = route.originPath
+    }
+
+    if (Array.isArray(route.routes)) {
+      newRoute.routes = mapRoutes(route.routes);
+    }
+
+    if (Array.isArray(route.children)) {
+      newRoute.children = mapRoutes(route.children);
+    }
+
+    return newRoute
+  })
 }
 
 export default (props: any) => {
@@ -156,11 +228,14 @@ const { formatMessage } = useIntl();
     },
   });
 
-  const matchedRoute = useMemo(() => matchRoutes(clientRoutes, location.pathname).pop()?.route, [location.pathname]);
+
+  // 现在的 layout 及 wrapper 实现是通过父路由的形式实现的, 会导致路由数据多了冗余层级, proLayout 消费时, 无法正确展示菜单, 这里对冗余数据进行过滤操作
   const newRoutes = filterRoutes(clientRoutes.filter(route => route.id === 'ant-design-pro-layout'), (route) => {
-    return !!route.isLayout && route.id !== 'ant-design-pro-layout';
+    return (!!route.isLayout && route.id !== 'ant-design-pro-layout') || !!route.isWrapper;
   })
-  const [route] = useAccessMarkedRoutes(newRoutes);
+  const [route] = useAccessMarkedRoutes(mapRoutes(newRoutes));
+
+  const matchedRoute = useMemo(() => matchRoutes(route.children, location.pathname)?.pop?.()?.route, [location.pathname]);
 
   return (
     <ProLayout
@@ -191,6 +266,7 @@ const { formatMessage } = useIntl();
         }
         return defaultDom;
       }}
+      itemRender={(route) => <Link to={route.path}>{route.breadcrumbName}</Link>}
       disableContentMargin
       fixSiderbar
       fixedHeader
@@ -220,8 +296,10 @@ const { formatMessage } = useIntl();
     >
       <Exception
         route={matchedRoute}
-        notFound={runtimeConfig.notFound}
-        noAccessible={runtimeConfig.noAccessible}
+        noFound={runtimeConfig?.noFound}
+        notFound={runtimeConfig?.notFound}
+        unAccessible={runtimeConfig?.unAccessible}
+        noAccessible={runtimeConfig?.noAccessible}
       >
         {runtimeConfig.childrenRender
           ? runtimeConfig.childrenRender(<Outlet />, props)
@@ -242,8 +320,9 @@ const { formatMessage } = useIntl();
     api.writeTmpFile({
       path: 'types.d.ts',
       content: `
-    import type { ProLayoutProps } from "${
-      pkgPath || '@ant-design/pro-layout'
+    ${PKG_TYPE_REFERENCE}
+    import type { ProLayoutProps, HeaderProps } from "${
+      pkgPath || '@ant-design/pro-components'
     }";
     ${
       hasInitialStatePlugin
@@ -253,16 +332,44 @@ const { formatMessage } = useIntl();
         : 'type InitDataType = any;'
     }
 
-    export type RunTimeLayoutConfig = (
-      initData: InitDataType,
-    ) => ProLayoutProps & {
-      childrenRender?: (dom: JSX.Element, props: ProLayoutProps) => React.ReactNode,
-      unAccessible?: JSX.Element,
-      noFound?: JSX.Element,
-    };
-    `,
-    });
+    import type { IConfigFromPlugins } from '@@/core/pluginConfig';
 
+    export type RunTimeLayoutConfig = (initData: InitDataType) => Omit<
+      ProLayoutProps,
+      'rightContentRender'
+    > & {
+      childrenRender?: (dom: JSX.Element, props: ProLayoutProps) => React.ReactNode;
+      unAccessible?: JSX.Element;
+      noFound?: JSX.Element;
+      logout?: (initialState: InitDataType['initialState']) => Promise<void> | void;
+      rightContentRender?: (
+        headerProps: HeaderProps,
+        dom: JSX.Element,
+        props: {
+          userConfig: IConfigFromPlugins['layout'];
+          runtimeConfig: RunTimeLayoutConfig;
+          loading: InitDataType['loading'];
+          initialState: InitDataType['initialState'];
+          setInitialState: InitDataType['setInitialState'];
+        },
+      ) => JSX.Element;
+      rightRender?: (
+        initialState: InitDataType['initialState'],
+        setInitialState: InitDataType['setInitialState'],
+        runtimeConfig: RunTimeLayoutConfig,
+      ) => JSX.Element;
+    };
+    `.trimStart(),
+    });
+    api.writeTmpFile({
+      path: RUNTIME_TYPE_FILE_NAME,
+      content: `
+import type { RunTimeLayoutConfig } from './types.d';
+export interface IRuntimeConfig {
+  layout?: RunTimeLayoutConfig
+}
+      `,
+    });
     const iconsMap = Object.keys(api.appData.routes).reduce<
       Record<string, boolean>
     >((memo, id) => {
@@ -281,9 +388,6 @@ const { formatMessage } = useIntl();
       return memo;
     }, {});
     const icons = Object.keys(iconsMap);
-    const antIconsPath = winPath(
-      dirname(require.resolve('@ant-design/icons/package')),
-    );
     api.writeTmpFile({
       path: 'icons.tsx',
       content: `
@@ -327,7 +431,7 @@ export function patchRoutes({ routes }) {
 
     const rightRenderContent = `
 import React from 'react';
-import { Avatar, Dropdown, Menu, Spin } from 'antd';
+import { Avatar, version, Dropdown, Menu, Spin } from 'antd';
 import { LogoutOutlined } from '@ant-design/icons';
 {{#Locale}}
 import { SelectLang } from '@@/plugin-locale';
@@ -347,19 +451,6 @@ export function getRightRenderContent (opts: {
     );
   }
 
-  const menu = (
-    <Menu className="umi-plugin-layout-menu">
-      <Menu.Item
-        key="logout"
-        onClick={() =>
-          opts.runtimeConfig.logout && opts.runtimeConfig?.logout(opts.initialState)
-        }
-      >
-        <LogoutOutlined />
-        退出登录
-      </Menu.Item>
-    </Menu>
-  );
 
   const avatar = (
     <span className="umi-plugin-layout-action">
@@ -384,10 +475,34 @@ export function getRightRenderContent (opts: {
     );
   }
 
+  const langMenu = {
+    className: "umi-plugin-layout-menu",
+    selectedKeys: [],
+    items: [
+      {
+        key: "logout",
+        label: (
+          <>
+            <LogoutOutlined />
+            退出登录
+          </>
+        ),
+        onClick: () => {
+          opts?.runtimeConfig?.logout?.(opts.initialState);
+        },
+      },
+    ],
+  };
+  // antd@5 和  4.24 之后推荐使用 menu，性能更好
+  const dropdownProps =
+    version.startsWith("5.") || version.startsWith("4.24.")
+      ? { menu: langMenu }
+      : { overlay: <Menu {...langMenu} /> };
+
   return (
     <div className="umi-plugin-layout-right anticon">
       {opts.runtimeConfig.logout ? (
-        <Dropdown overlay={menu} overlayClassName="umi-plugin-layout-container">
+        <Dropdown {...dropdownProps} overlayClassName="umi-plugin-layout-container">
           {avatar}
         </Dropdown>
       ) : (
@@ -415,9 +530,13 @@ export function getRightRenderContent (opts: {
     api.writeTmpFile({
       path: 'Layout.less',
       content: `
-@import '~antd/es/style/themes/default.less';
-@pro-header-hover-bg: rgba(0, 0, 0, 0.025);
-@media screen and (max-width: @screen-xs) {
+${
+  // antd@5里面没有这个样式了
+  antdVersion.startsWith('5')
+    ? ''
+    : "@import '~antd/es/style/themes/default.less';"
+}
+@media screen and (max-width: 480px) {
   // 在小屏幕的时候可以有更好的体验
   .umi-plugin-layout-container {
     width: 100% !important;
@@ -448,14 +567,14 @@ export function getRightRenderContent (opts: {
     cursor: pointer;
     transition: all 0.3s;
     > i {
-      color: @text-color;
+      color: rgba(255, 255, 255, 0.85);
       vertical-align: middle;
     }
     &:hover {
-      background: @pro-header-hover-bg;
+      background: rgba(0, 0, 0, 0.025);
     }
     &:global(.opened) {
-      background: @pro-header-hover-bg;
+      background: rgba(0, 0, 0, 0.025);
     }
   }
   .umi-plugin-layout-search {
@@ -468,7 +587,7 @@ export function getRightRenderContent (opts: {
 .umi-plugin-layout-name {
   margin-left: 8px;
 }
-      `,
+`,
     });
 
     // Logo.tsx
@@ -581,13 +700,15 @@ const Exception: React.FC<{
   route?: IRoute;
   notFound?: React.ReactNode;
   noAccessible?: React.ReactNode;
+  unAccessible?: React.ReactNode;
+  noFound?: React.ReactNode;
 }> = (props) => (
   // render custom 404
-  (!props.route && props.notFound) ||
+  (!props.route && (props.noFound || props.notFound)) ||
   // render custom 403
-  (props.route.unaccessible && props.noAccessible) ||
+  (props.route?.unaccessible && (props.unAccessible || props.noAccessible)) ||
   // render default exception
-  ((!props.route || props.route.unaccessible) && (
+  ((!props.route || props.route?.unaccessible) && (
     <Result
       status={props.route ? '403' : '404'}
       title={props.route ? '403' : '404'}

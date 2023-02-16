@@ -1,6 +1,7 @@
-import { lodash, tryPaths, winPath } from '@umijs/utils';
+import { lodash, winPath } from '@umijs/utils';
 import { existsSync, readdirSync } from 'fs';
 import { basename, dirname, join } from 'path';
+import { RUNTIME_TYPE_FILE_NAME } from 'umi';
 import { TEMPLATES_DIR } from '../../constants';
 import { IApi } from '../../types';
 import { getModuleExports } from './getModuleExports';
@@ -88,6 +89,12 @@ export default (api: IApi) => {
                 : {}),
             },
           },
+          include: [
+            `${baseUrl}.umirc.ts`,
+            `${baseUrl}**/*.d.ts`,
+            `${baseUrl}**/*.ts`,
+            `${baseUrl}**/*.tsx`,
+          ],
         },
         null,
         2,
@@ -286,12 +293,18 @@ declare module '*.txt' {
         imports: importsToStr(
           await api.applyPlugins({
             key: 'addEntryImports',
-            initialValue: [],
+            initialValue: [
+              // append overrides.{ext} style file
+              api.appData.overridesCSS.length && {
+                source: api.appData.overridesCSS[0],
+              },
+            ].filter(Boolean),
           }),
         ).join('\n'),
         basename: api.config.base,
         historyType: api.config.history.type,
         hydrate: !!api.config.ssr,
+        reactRouter5Compat: !!api.config.reactRouter5Compat,
         loadingComponent:
           existsSync(join(api.paths.absSrcPath, 'loading.tsx')) ||
           existsSync(join(api.paths.absSrcPath, 'loading.jsx')) ||
@@ -303,11 +316,14 @@ declare module '*.txt' {
     api.writeTmpFile({
       noPluginDir: true,
       path: 'core/EmptyRoute.tsx',
+      // https://github.com/umijs/umi/issues/8782
+      // Empty <Outlet /> needs to pass through outlet context, otherwise nested route will not get context value.
       content: `
 import React from 'react';
-import { Outlet } from 'umi';
+import { Outlet, useOutletContext } from 'umi';
 export default function EmptyRoute() {
-  return <Outlet />;
+  const context = useOutletContext();
+  return <Outlet context={context} />;
 }
       `,
     });
@@ -332,8 +348,8 @@ export default function EmptyRoute() {
     for (const id of Object.keys(clonedRoutes)) {
       for (const key of Object.keys(clonedRoutes[id])) {
         const route = clonedRoutes[id];
-        // Remove __ prefix props and absPath props
-        if (key.startsWith('__') || key.startsWith('absPath')) {
+        // Remove __ prefix props, absPath props and file props
+        if (key.startsWith('__') || ['absPath', 'file'].includes(key)) {
           delete route[key];
         }
       }
@@ -355,14 +371,7 @@ export default function EmptyRoute() {
     // plugin.ts
     const plugins: string[] = await api.applyPlugins({
       key: 'addRuntimePlugin',
-      initialValue: [
-        tryPaths([
-          join(api.paths.absSrcPath, 'app.ts'),
-          join(api.paths.absSrcPath, 'app.tsx'),
-          join(api.paths.absSrcPath, 'app.jsx'),
-          join(api.paths.absSrcPath, 'app.js'),
-        ]),
-      ].filter(Boolean),
+      initialValue: [api.appData.appJS?.path].filter(Boolean),
     });
     const validKeys = await api.applyPlugins({
       key: 'addRuntimePluginKey',
@@ -370,6 +379,7 @@ export default function EmptyRoute() {
         'patchRoutes',
         'patchClientRoutes',
         'modifyContextOpts',
+        'modifyClientRenderOpts',
         'rootContainer',
         'innerProvider',
         'i18nProvider',
@@ -380,6 +390,7 @@ export default function EmptyRoute() {
         'onRouteChange',
       ],
     });
+    const appPluginRegExp = /(\/|\\)app.(ts|tsx|jsx|js)$/;
     api.writeTmpFile({
       noPluginDir: true,
       path: 'core/plugin.ts',
@@ -387,9 +398,13 @@ export default function EmptyRoute() {
       context: {
         plugins: plugins.map((plugin, index) => ({
           index,
+          // 在 app.ts 中，如果使用了 defineApp 方法，会存在 export default 的情况
+          hasDefaultExport: appPluginRegExp.test(plugin),
           path: winPath(plugin),
         })),
         validKeys,
+        // Inject code for vite only
+        isViteMode: !!api.config.vite,
       },
     });
 
@@ -422,7 +437,9 @@ export default function EmptyRoute() {
           serverRendererPath,
           umiServerPath,
           validKeys,
-          assetsPath: join(api.paths.absOutputPath, 'build-manifest.json'),
+          assetsPath: winPath(
+            join(api.paths.absOutputPath, 'build-manifest.json'),
+          ),
           env: JSON.stringify(api.env),
         },
       });
@@ -431,12 +448,23 @@ export default function EmptyRoute() {
     // history.ts
     // only react generates because the preset-vue override causes vite hot updates to fail
     if (api.appData.framework === 'react') {
+      const historyPath = api.config.historyWithQuery
+        ? winPath(dirname(require.resolve('@umijs/history/package.json')))
+        : rendererPath;
       api.writeTmpFile({
         noPluginDir: true,
         path: 'core/history.ts',
         tplPath: join(TEMPLATES_DIR, 'history.tpl'),
         context: {
-          rendererPath,
+          historyPath,
+        },
+      });
+      api.writeTmpFile({
+        noPluginDir: true,
+        path: 'core/historyIntelli.ts',
+        tplPath: join(TEMPLATES_DIR, 'historyIntelli.tpl'),
+        context: {
+          historyPath,
         },
       });
     }
@@ -495,6 +523,7 @@ export default function EmptyRoute() {
           })
         ).join(', ')} } from '${rendererPath}';`,
       );
+      exports.push(`export type {  History } from '${rendererPath}'`);
       // umi/client/client/plugin
       exports.push('// umi/client/client/plugin');
       const umiPluginPath = winPath(join(umiDir, 'client/client/plugin.js'));
@@ -522,17 +551,29 @@ export default function EmptyRoute() {
           path: '@@/core/terminal.ts',
         });
       }
+      if (api.config.test !== false && api.appData.framework === 'react') {
+        if (
+          process.env.NODE_ENV === 'test' ||
+          // development is for TestBrowser's type
+          process.env.NODE_ENV === 'development'
+        ) {
+          exports.push(`export { TestBrowser } from './testBrowser';`);
+        }
+      }
       // plugins
       exports.push('// plugins');
-      const plugins = readdirSync(api.paths.absTmpPath).filter((file) => {
+      const allPlugins = readdirSync(api.paths.absTmpPath).filter((file) =>
+        file.startsWith('plugin-'),
+      );
+      const plugins = allPlugins.filter((file) => {
         if (
-          file.startsWith('plugin-') &&
-          (existsSync(join(api.paths.absTmpPath, file, 'index.ts')) ||
-            existsSync(join(api.paths.absTmpPath, file, 'index.tsx')))
+          existsSync(join(api.paths.absTmpPath, file, 'index.ts')) ||
+          existsSync(join(api.paths.absTmpPath, file, 'index.tsx'))
         ) {
           return true;
         }
       });
+
       for (const plugin of plugins) {
         let file: string;
         if (existsSync(join(api.paths.absTmpPath, plugin, 'index.ts'))) {
@@ -553,9 +594,10 @@ export default function EmptyRoute() {
           );
         }
       }
+
       // plugins types.ts
       exports.push('// plugins types.d.ts');
-      for (const plugin of plugins) {
+      for (const plugin of allPlugins) {
         const file = winPath(join(api.paths.absTmpPath, plugin, 'types.d.ts'));
         if (existsSync(file)) {
           // 带 .ts 后缀的声明文件 会导致声明失效
@@ -563,12 +605,53 @@ export default function EmptyRoute() {
           exports.push(`export * from '${noSuffixFile}';`);
         }
       }
+      // plugins runtimeConfig.d.ts
+      let pluginIndex = 0;
+      const beforeImport = [];
+      let runtimeConfigType =
+        'export type RuntimeConfig = IDefaultRuntimeConfig';
+
+      for (const plugin of allPlugins) {
+        const runtimeConfigFile = winPath(
+          join(api.paths.absTmpPath, plugin, RUNTIME_TYPE_FILE_NAME),
+        );
+        if (existsSync(runtimeConfigFile)) {
+          const noSuffixRuntimeConfigFile = runtimeConfigFile.replace(
+            /\.ts$/,
+            '',
+          );
+          beforeImport.push(
+            `import type { IRuntimeConfig as Plugin${pluginIndex} } from '${noSuffixRuntimeConfigFile}'`,
+          );
+          runtimeConfigType += ` & Plugin${pluginIndex}`;
+          pluginIndex += 1;
+        }
+      }
+      api.writeTmpFile({
+        noPluginDir: true,
+        path: 'core/defineApp.ts',
+        tplPath: join(TEMPLATES_DIR, 'defineApp.tpl'),
+        context: {
+          beforeImport: beforeImport.join('\n'),
+          runtimeConfigType,
+        },
+      });
+      // FIXME: if exported after plugins, circular dependency:
+      //        `app.ts -> exports.ts -> plugin -> core/plugin.ts -> app.ts`
+      //        we will get a `defineApp` of `undefined`
+      // https://github.com/umijs/umi/issues/9702
+      // https://github.com/umijs/umi/issues/10412
+      exports.unshift(
+        `export { defineApp } from './core/defineApp'`,
+        // https://javascript.plainenglish.io/leveraging-type-only-imports-and-exports-with-typescript-3-8-5c1be8bd17fb
+        `export type { RuntimeConfig } from './core/defineApp'`,
+      );
       api.writeTmpFile({
         noPluginDir: true,
         path: 'exports.ts',
         content: exports.join('\n'),
       });
     },
-    stage: Infinity,
+    stage: 10000,
   });
 };

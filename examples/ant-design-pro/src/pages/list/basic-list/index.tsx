@@ -1,6 +1,6 @@
 import { useRequest } from '@@/plugin-request';
 import { DownOutlined, PlusOutlined } from '@ant-design/icons';
-import { PageContainer } from '@ant-design/pro-layout';
+import { PageContainer } from '@ant-design/pro-components';
 import {
   Avatar,
   Button,
@@ -254,7 +254,7 @@ export const BasicList: FC = () => {
       </Button>
       <OperationModal
         done={done}
-        visible={visible}
+        open={visible}
         current={current}
         onDone={handleDone}
         onSubmit={handleSubmit}

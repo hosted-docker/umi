@@ -1,18 +1,10 @@
 import { chokidar, lodash, logger } from '@umijs/utils';
 import { readFileSync } from 'fs';
 import { join, relative } from 'path';
+import type { FileChangeEvent, FileContentCache } from './types';
 
 const { watch } = chokidar;
 type FSWatcher = ReturnType<typeof watch>;
-
-type AbsPath = string;
-type FileContent = string;
-type FileContentCache = Record<AbsPath, FileContent>;
-
-export type FileChangeEvent = {
-  event: 'unlink' | 'change' | 'add';
-  path: string;
-};
 
 export class AutoUpdateFolderCache {
   fileContentCache: FileContentCache = {};
@@ -39,7 +31,6 @@ export class AutoUpdateFolderCache {
     ignored: string[];
     filesLoader?: (files: string[]) => Promise<Record<string, string>>;
   }) {
-    console.log('the path ', `./**/*.{${opts.exts.join(',')}}`);
     this.cwd = opts.cwd;
     this.onCacheUpdated = opts.onCacheUpdate;
     this.filesLoader = opts.filesLoader || this._defaultLoader;

@@ -66,6 +66,26 @@ Copy:  pages/users/foo.tsx
 info  - generate files
 ```
 
+BUN
+```bash
+$ bunx create-umi
+✔ Pick Umi App Template › Simple App
+✔ Pick Npm Client › pnpm
+✔ Pick Npm Registry › npm
+Write: .gitignore
+Write: .npmrc
+Write: .umirc.ts
+Write: package.json
+Copy:  src/assets/yay.jpg
+Copy:  src/layouts/index.less
+Write: src/layouts/index.tsx
+Copy:  src/pages/docs.tsx
+Copy:  src/pages/index.tsx
+Write: tsconfig.json
+Copy:  typings.d.ts
+ready - Git initialized successfully
+```
+
 NPM
 ```bash
 $ npx create-umi@latest
@@ -90,6 +110,7 @@ Copy:  typings.d.ts
 > postinstall
 > umi setup
 ```
+
 YARN
 ```bash
 $ yarn create umi
@@ -116,7 +137,18 @@ info  - generate files
 ```
 </Tabbed>
 
+注：使用 bun 初始化项目会更快，需要 bun >= `0.4.0` 版本。
+
 国内建议选 **pnpm + taobao 源**，速度提升明显。这一步会自动安装依赖，同时安装成功后会自动执行 `umi setup` 做一些文件预处理等工作。
+
+### 参数选项
+
+使用 `create-umi` 创建项目时，可用的参数如下：
+
+option|description
+:-:|:-
+`--no-git`|创建项目，但不初始化 Git
+`--no-install`|创建项目，但不自动安装依赖
 
 ## 启动项目
 
@@ -124,7 +156,13 @@ info  - generate files
 
 ```bash
 $ pnpm dev
-ready - App listening at http://127.0.0.1:8000
+        ╔═════════════════════════════════════════════════════╗
+        ║ App listening at:                                   ║
+        ║  >   Local: https://127.0.0.1:8000                  ║
+ready - ║  > Network: https://192.168.1.1:8000                ║
+        ║                                                     ║
+        ║ Now you can open browser with the above addresses👆 ║
+        ╚═════════════════════════════════════════════════════╝
 event - compiled successfully in 1121 ms (388 modules)
 event - MFSU compiled successfully in 1308 ms (875 modules)
 ```

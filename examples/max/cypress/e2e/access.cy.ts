@@ -1,6 +1,13 @@
 /// <reference types="cypress" />
 
 describe('access', function () {
+  beforeEach(() => {
+    Cypress.automation('remote:debugger:protocol', {
+      command: 'Network.setCacheDisabled',
+      params: { cacheDisabled: true },
+    });
+  });
+
   it('show accessible content no denied', () => {
     cy.visit('/');
     cy.contains('Allow');

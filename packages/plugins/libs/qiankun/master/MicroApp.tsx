@@ -18,12 +18,11 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { qiankunStateForSlaveModelNamespace } from './constants';
 import { ErrorBoundary } from './ErrorBoundary';
 import { getMasterOptions } from './masterOptions';
 import MicroAppLoader from './MicroAppLoader';
 import { MasterOptions } from './types';
-
-const qiankunStateForSlaveModelNamespace = '@@qiankunStateForSlave';
 
 type HashHistory = {
   type?: 'hash';
@@ -75,6 +74,7 @@ export const MicroApp = forwardRef(
       lifeCycles: globalLifeCycles,
       prefetch = true,
       appNameKeyAlias = 'name',
+      prefetchThreshold = 5,
       ...globalSettings
     } = getMasterOptions() as MasterOptions;
 
@@ -88,9 +88,16 @@ export const MicroApp = forwardRef(
       ...propsFromParams
     } = componentProps;
 
-    // 优先使用 alias 名匹配，fallback 到 name 匹配
-    const name = componentProps[appNameKeyAlias] || componentProps.name;
-    const isCurrentApp = (app: any) => app[appNameKeyAlias] === name || app.name === name;
+    // ref: https://github.com/umijs/plugins/pull/866
+    // name 跟 appNameKeyAlias 这两个 key 同时存在时，优先使用 name，避免对存量应用造成 breaking change。
+    // 比如 appNameKeyAlias 配置是 id，但之前 id 正好作为普通的 props 使用过，如 <MicroApp name="app" id="123" />
+    // 正常场景会优先匹配 appNameKeyAlias 对应的字段，fallback 到 name，避免对已经使用 <MicroApp name="app" /> 的应用造成影响
+    const name =
+      componentProps.name && componentProps[appNameKeyAlias]
+        ? componentProps.name
+        : componentProps[appNameKeyAlias] || componentProps.name;
+    const isCurrentApp = (app: any) =>
+      app[appNameKeyAlias] === name || app.name === name;
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<any>(null);
@@ -143,13 +150,6 @@ export const MicroApp = forwardRef(
       setComponentError(null);
       setLoading(true);
       const configuration = {
-        fetch(url) {
-          return window.fetch(url, {
-            headers: {
-              accept: 'text/html',
-            },
-          });
-        },
         globalContext: window,
         ...globalSettings,
         ...settingsFromProps,
@@ -163,6 +163,12 @@ export const MicroApp = forwardRef(
             ...propsFromConfig,
             ...stateForSlave,
             ...propsFromParams,
+            __globalRoutesInfo: {
+              appNameKeyAlias,
+              masterHistoryType,
+              base: globalSettings.base,
+              microAppRoutes: globalSettings.microAppRoutes,
+            },
             setLoading,
           },
         },
@@ -178,11 +184,17 @@ export const MicroApp = forwardRef(
           if (noneMounted) {
             if (Array.isArray(prefetch)) {
               const specialPrefetchApps = apps.filter(
-                (app) => !isCurrentApp(app) && (prefetch.indexOf(app[appNameKeyAlias]) !== -1 || prefetch.indexOf(app.name) !== -1)
+                (app) =>
+                  !isCurrentApp(app) &&
+                  (prefetch.indexOf(app[appNameKeyAlias]) !== -1 ||
+                    prefetch.indexOf(app.name) !== -1),
               );
               prefetchApps(specialPrefetchApps, configuration);
             } else {
-              const otherNotMountedApps = apps.filter((app) => !isCurrentApp(app));
+              // 不能无脑全量 prefetch，需要有一个阈值
+              const otherNotMountedApps = apps
+                .filter((app) => !isCurrentApp(app))
+                .slice(0, prefetchThreshold);
               prefetchApps(otherNotMountedApps, configuration);
             }
             noneMounted = false;
@@ -219,6 +231,12 @@ export const MicroApp = forwardRef(
                 ...propsFromConfig,
                 ...stateForSlave,
                 ...propsFromParams,
+                __globalRoutesInfo: {
+                  appNameKeyAlias,
+                  masterHistoryType,
+                  base: globalSettings.base,
+                  microAppRoutes: globalSettings.microAppRoutes,
+                },
                 setLoading,
               };
 
@@ -256,16 +274,26 @@ export const MicroApp = forwardRef(
         ? (loading) => <MicroAppLoader loading={loading} />
         : null);
 
+    const microAppWrapperClassName = wrapperClassName
+      ? `${wrapperClassName} qiankun-micro-app-wrapper`
+      : 'qiankun-micro-app-wrapper';
+    const microAppClassName = className
+      ? `${className} qiankun-micro-app-container`
+      : 'qiankun-micro-app-container';
+
     return Boolean(microAppLoader) || Boolean(microAppErrorBoundary) ? (
-      <div style={{ position: 'relative' }} className={wrapperClassName}>
+      <div
+        style={{ position: 'relative' }}
+        className={microAppWrapperClassName}
+      >
         {Boolean(microAppLoader) && microAppLoader(loading)}
         {Boolean(microAppErrorBoundary) &&
           Boolean(error) &&
           microAppErrorBoundary(error)}
-        <div ref={containerRef} className={className} />
+        <div ref={containerRef} className={microAppClassName} />
       </div>
     ) : (
-      <div ref={containerRef} className={className} />
+      <div ref={containerRef} className={microAppClassName} />
     );
   },
 );

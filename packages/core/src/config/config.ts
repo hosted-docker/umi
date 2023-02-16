@@ -1,5 +1,5 @@
 import esbuild from '@umijs/bundler-utils/compiled/esbuild';
-import { chokidar, lodash, register } from '@umijs/utils';
+import { chokidar, lodash, register, semver } from '@umijs/utils';
 import joi from '@umijs/utils/compiled/@hapi/joi';
 import assert from 'assert';
 import { existsSync } from 'fs';
@@ -11,7 +11,7 @@ import {
   SHORT_ENV,
   WATCH_DEBOUNCE_STEP,
 } from '../constants';
-import { Env } from '../types';
+import { Env, type IOnChangeTypes } from '../types';
 import { addExt, getAbsFiles } from './utils';
 
 interface IOpts {
@@ -22,8 +22,6 @@ interface IOpts {
 }
 
 type ISchema = Record<string, any>;
-
-type IOnChangeTypes = Record<string, string | Function>;
 
 export class Config {
   public opts: IOpts;
@@ -104,7 +102,7 @@ export class Config {
             path,
           })
           .catch((e) => {
-            throw new Error(e);
+            throw e;
           });
       }, WATCH_DEBOUNCE_STEP),
     );
@@ -147,9 +145,12 @@ export class Config {
               file: mainConfigFile,
               ext: `.${env}.${specifiedEnv}`,
             }),
-          addExt({ file: mainConfigFile, ext: LOCAL_EXT }),
         ].filter(Boolean),
       );
+
+      if (opts.env === Env.development) {
+        ret.push(addExt({ file: mainConfigFile, ext: LOCAL_EXT }));
+      }
     }
     return ret;
   }
@@ -167,7 +168,12 @@ export class Config {
         try {
           config = lodash.merge(config, require(configFile).default);
         } catch (e) {
-          // @ts-ignore
+          // Error.prototype.cause has been fully supported from  node v16.9.0
+          // Ref https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/cause#browser_compatibility
+          if (semver.lt(semver.clean(process.version)!, '16.9.0')) {
+            throw e;
+          }
+
           throw new Error(`Parse config file failed: [${configFile}]`, {
             cause: e,
           });

@@ -1,6 +1,9 @@
-import type { Program } from '@swc/core';
-import { autoCssModulesHandler, esbuildLoader } from '@umijs/mfsu';
-import { chalk } from '@umijs/utils';
+import {
+  autoCssModulesHandler,
+  esbuildLoader,
+  VIRTUAL_ENTRY_DIR,
+} from '@umijs/mfsu';
+import { chalk, lodash, resolve } from '@umijs/utils';
 import { dirname, isAbsolute } from 'path';
 import { ProvidePlugin } from '../../compiled/webpack';
 import Config from '../../compiled/webpack-5-chain';
@@ -15,7 +18,7 @@ interface IOpts {
   env: Env;
   extraBabelPlugins: any[];
   extraBabelPresets: any[];
-  extraBabelIncludes: string[];
+  extraBabelIncludes: Array<string | RegExp>;
   extraEsbuildLoaderHandler: any[];
   babelPreset: any;
   name?: string;
@@ -31,7 +34,7 @@ export async function addJavaScriptRules(opts: IOpts) {
   const srcRules = [
     config.module
       .rule('src')
-      .test(/\.(js|mjs)$/)
+      .test(/\.(js|mjs|cjs)$/)
       .include.add([
         cwd,
         // import module out of cwd using APP_ROOT
@@ -44,10 +47,15 @@ export async function addJavaScriptRules(opts: IOpts) {
     config.module.rule('jsx-ts-tsx').test(/\.(jsx|ts|tsx)$/),
     config.module
       .rule('extra-src')
-      .test(/\.(js|mjs)$/)
+      .test(/\.(js|mjs|cjs)$/)
       .include.add([
         // support extraBabelIncludes
         ...opts.extraBabelIncludes.map((p) => {
+          // regexp
+          if (lodash.isRegExp(p)) {
+            return p;
+          }
+
           // handle absolute path
           if (isAbsolute(p)) {
             return p;
@@ -58,15 +66,22 @@ export async function addJavaScriptRules(opts: IOpts) {
             if (p.startsWith('./')) {
               return require.resolve(p, { paths: [cwd] });
             }
-
+            // use resolve instead of require.resolve
+            // since require.resolve may meet the ERR_PACKAGE_PATH_NOT_EXPORTED error
             return dirname(
-              require.resolve(`${p}/package.json`, { paths: [cwd] }),
+              resolve.sync(`${p}/package.json`, {
+                basedir: cwd,
+                // same behavior as webpack, to ensure `include` paths matched
+                // ref: https://webpack.js.org/configuration/resolve/#resolvesymlinks
+                preserveSymlinks: false,
+              }),
             );
           } catch (e: any) {
             if (e.code === 'MODULE_NOT_FOUND') {
-              throw new Error('Cannot resolve extraBabelIncludes: ' + p);
+              throw new Error('Cannot resolve extraBabelIncludes: ' + p, {
+                cause: e,
+              });
             }
-
             throw e;
           }
         }),
@@ -90,7 +105,7 @@ export async function addJavaScriptRules(opts: IOpts) {
   const depRules = [
     config.module
       .rule('dep')
-      .test(/\.(js|mjs)$/)
+      .test(/\.(js|mjs|cjs)$/)
       .include.add(/node_modules/)
       .end()
       .exclude.add((path: string) => {
@@ -119,11 +134,15 @@ export async function addJavaScriptRules(opts: IOpts) {
           // https://github.com/webpack/webpack/issues/4039#issuecomment-419284940
           sourceType: 'unambiguous',
           babelrc: false,
+          configFile: false,
           cacheDirectory: false,
+          browserslistConfigFile: false,
           // process.env.BABEL_CACHE !== 'none'
           //   ? join(cwd, `.umi/.cache/babel-loader`)
           //   : false,
           targets: userConfig.targets,
+          // 解决 vue MFSU 解析 需要
+          customize: userConfig.babelLoaderCustomize,
           presets: [
             opts.babelPreset || [
               require.resolve('@umijs/babel-preset-umi'),
@@ -147,12 +166,16 @@ export async function addJavaScriptRules(opts: IOpts) {
           ].filter(Boolean),
         });
     } else if (srcTranspiler === Transpiler.swc) {
-      const AutoCSSModule = require('../swcPlugins/autoCSSModules').default;
       rule
         .use('swc-loader')
         .loader(require.resolve('../loader/swc'))
         .options({
-          plugin: (m: Program) => new AutoCSSModule().visitProgram(m),
+          excludeFiles: [
+            // exclude MFSU virtual entry files, because swc not support top level await
+            new RegExp(`/${VIRTUAL_ENTRY_DIR}/[^\\/]+\\.js$`),
+          ],
+          enableAutoCssModulesPlugin: userConfig.autoCSSModules,
+          mergeConfigs: userConfig.srcTranspilerOptions?.swc,
         });
     } else if (srcTranspiler === Transpiler.esbuild) {
       rule
@@ -161,6 +184,7 @@ export async function addJavaScriptRules(opts: IOpts) {
         .options({
           target: isDev ? 'esnext' : 'es2015',
           handler: [autoCssModulesHandler, ...opts.extraEsbuildLoaderHandler],
+          ...userConfig.srcTranspilerOptions?.esbuild,
         });
       // esbuild loader can not auto import `React`
       config.plugin('react-provide-plugin').use(ProvidePlugin, [
