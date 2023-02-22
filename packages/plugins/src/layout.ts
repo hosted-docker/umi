@@ -342,7 +342,7 @@ const { formatMessage } = useIntl();
       unAccessible?: JSX.Element;
       noFound?: JSX.Element;
       logout?: (initialState: InitDataType['initialState']) => Promise<void> | void;
-      rightContentRender?: (
+      rightContentRender?: ((
         headerProps: HeaderProps,
         dom: JSX.Element,
         props: {
@@ -352,7 +352,7 @@ const { formatMessage } = useIntl();
           initialState: InitDataType['initialState'];
           setInitialState: InitDataType['setInitialState'];
         },
-      ) => JSX.Element;
+      ) => JSX.Element) | false;
       rightRender?: (
         initialState: InitDataType['initialState'],
         setInitialState: InitDataType['setInitialState'],
@@ -432,7 +432,7 @@ export function patchRoutes({ routes }) {
     const rightRenderContent = `
 import React from 'react';
 import { Avatar, version, Dropdown, Menu, Spin } from 'antd';
-import { LogoutOutlined } from '@ant-design/icons';
+import { LogoutOutlined } from '${antIconsPath}';
 {{#Locale}}
 import { SelectLang } from '@@/plugin-locale';
 {{/Locale}}
