@@ -1,6 +1,7 @@
 import type { Plugin } from '@umijs/bundler-utils/compiled/esbuild';
 import { aliasUtils, winPath } from '@umijs/utils';
 import path from 'path';
+import { isRelativePath } from './isRelative';
 
 export function esbuildExternalPlugin(opts: {
   alias: Record<string, string>;
@@ -40,14 +41,14 @@ export function esbuildExternalPlugin(opts: {
             if (aliasImport.includes('node_modules')) {
               return { external: true };
             }
-            // non node_modules abs path, keep it as it is
-            if (aliasImport.startsWith('/')) {
+            // non node_modules abs path, if this happens, it means that the `esbuildAliasPlugin` missed out alias matching
+            // this is a known case that happened in windows when using `@/pages/xxx.tsx`
+            if (path.isAbsolute(aliasImport)) {
               return null;
             }
-            // a relative path
-            if (aliasImport.startsWith('./') || aliasImport.startsWith('../')) {
-              const resolved = path.resolve(args.resolveDir, aliasImport);
-              return { path: resolved };
+            // a relative path, left it to alias plugin to resolve
+            if (isRelativePath(aliasImport)) {
+              return null;
             }
             // not a path, a pkg name, external it; e.g {alias: {request: 'umi-request'} }
             return { external: true };

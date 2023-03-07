@@ -308,10 +308,7 @@ declare module '*.txt' {
         historyType: api.config.history.type,
         hydrate: !!api.config.ssr,
         reactRouter5Compat: !!api.config.reactRouter5Compat,
-        loadingComponent:
-          existsSync(join(api.paths.absSrcPath, 'loading.tsx')) ||
-          existsSync(join(api.paths.absSrcPath, 'loading.jsx')) ||
-          existsSync(join(api.paths.absSrcPath, 'loading.js')),
+        loadingComponent: api.appData.globalLoading,
       },
     });
 
@@ -380,7 +377,12 @@ export default function EmptyRoute() {
         '...$1',
       );
       // import: route props
-      headerImports.push(`import routeProps from './routeProps.js';`);
+      // why has this branch? since test env don't build routeProps.js
+      if (process.env.NODE_ENV === 'test') {
+        headerImports.push(`import routeProps from './routeProps';`);
+      } else {
+        headerImports.push(`import routeProps from './routeProps.js';`);
+      }
       // prevent override internal route props
       headerImports.push(`
 if (process.env.NODE_ENV === 'development') {
