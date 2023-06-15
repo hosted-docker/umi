@@ -17,6 +17,7 @@ import { addCompressPlugin } from './compressPlugin';
 import { addCopyPlugin } from './copyPlugin';
 import { addCSSRules } from './cssRules';
 import { addDefinePlugin } from './definePlugin';
+import { addDependenceCssModulesDetector } from './detectCssModulesInDependence';
 import { addDetectDeadCodePlugin } from './detectDeadCodePlugin';
 import { addFastRefreshPlugin } from './fastRefreshPlugin';
 import { addForkTSCheckerPlugin } from './forkTSCheckerPlugin';
@@ -63,6 +64,8 @@ export async function getConfig(opts: IOpts): Promise<Configuration> {
   const isDev = opts.env === Env.development;
   const config = new Config();
   userConfig.targets ||= DEFAULT_BROWSER_TARGETS;
+  // normalize inline limit
+  userConfig.inlineLimit = parseInt(userConfig.inlineLimit || '10000', 10);
   const useHash = !!(opts.hash || (userConfig.hash && !isDev));
   const applyOpts = {
     name: opts.name,
@@ -208,6 +211,8 @@ export async function getConfig(opts: IOpts): Promise<Configuration> {
   // remove node: prefix
   // disable for performance
   // await addNodePrefixPlugin(applyOpts);
+  // prevent runtime error due to css module in node modules.
+  await addDependenceCssModulesDetector(applyOpts);
   // runtimePublicPath
   if (userConfig.runtimePublicPath) {
     config.plugin('runtimePublicPath').use(RuntimePublicPathPlugin);

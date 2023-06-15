@@ -4,6 +4,10 @@ import { Tabbed, Message } from 'umi';
 
 在 Umi 项目使用 Module Federation 功能。
 
+<Message emoji="🚨" type="warning">
+Module Federation 功能需要浏览器支持 `Top Level Await` 特性。在生产环境中使用请注意浏览器是否支持([浏览器支持情况](https://caniuse.com/?search=top%20level%20await))。
+</Message>
+
 ## 配置
 
 ### 使用远端模块配置
@@ -192,7 +196,7 @@ const RemoteCounter = React.lazy(() => {
   return safeMfImport('remoteCounter/Counter', { defualt: () => 'Fallback' });
 });
 
-export default () => {
+export default function Page() {
   return (
     <Suspense fallback="loading">
       <RemoteCounter />
@@ -230,7 +234,7 @@ const RemoteCounter = safeRemoteComponent<React.FC<{ init?: number }>>({
   loadingElement: 'Loading',
 });
 
-export default () => {
+export default function Page() {
   return (
     <div>
       <RemoteCounter init={808} />
@@ -299,7 +303,7 @@ const RemoteCounter = safeRemoteComponentWithMfConfig<
   loadingElement: 'raw Loading',
 });
 
-export default () => {
+export default function Page() {
   return <RemoteCounter />;
 };
 ```

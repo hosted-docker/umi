@@ -7,19 +7,18 @@ import { Model, ModelUtils } from './utils/modelUtils';
 import { withTmpPath } from './utils/withTmpPath';
 
 export default (api: IApi) => {
-  const pkgPath = join(__dirname, '../libs/dva.ts');
+  const pkgPath = join(__dirname, '../libs/dva.tsx');
 
   api.describe({
     config: {
-      schema(Joi) {
-        return Joi.alternatives().try(
-          Joi.object({
-            extraModels: Joi.array().items(Joi.string()),
-            immer: Joi.object(),
-            skipModelValidate: Joi.boolean(),
-          }),
-          Joi.boolean().invalid(true),
-        );
+      schema({ zod }) {
+        return zod
+          .object({
+            extraModels: zod.array(zod.string()),
+            immer: zod.record(zod.any()),
+            skipModelValidate: zod.boolean(),
+          })
+          .deepPartial();
       },
     },
     enableBy: api.EnableBy.config,

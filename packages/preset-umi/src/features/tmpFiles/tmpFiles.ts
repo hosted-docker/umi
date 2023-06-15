@@ -17,8 +17,8 @@ export default (api: IApi) => {
   api.describe({
     key: 'tmpFiles',
     config: {
-      schema(Joi) {
-        return Joi.boolean();
+      schema({ zod }) {
+        return zod.boolean();
       },
     },
   });
@@ -40,68 +40,77 @@ export default (api: IApi) => {
     );
 
     // tsconfig.json
+    const frameworkName = api.service.frameworkName;
     const srcPrefix = api.appData.hasSrcDir ? 'src/' : '';
-    const umiTempDir = `${srcPrefix}.umi`;
+    const umiTempDir = `${srcPrefix}.${frameworkName}`;
     const baseUrl = api.appData.hasSrcDir ? '../../' : '../';
+    const isTs5 = api.appData.typescript.tsVersion?.startsWith('5');
+    const isTslibInstalled = !!api.appData.typescript.tslibVersion;
+
+    // x 1、basic config
+    // x 2、alias
+    // 3、language service platform
+    // 4、typing
+    let umiTsConfig = {
+      compilerOptions: {
+        target: 'esnext',
+        module: 'esnext',
+        lib: ['dom', 'dom.iterable', 'esnext'],
+        allowJs: true,
+        skipLibCheck: true,
+        moduleResolution: isTs5 ? 'bundler' : 'node',
+        importHelpers: isTslibInstalled,
+        noEmit: true,
+        jsx: api.appData.framework === 'vue' ? 'preserve' : 'react-jsx',
+        esModuleInterop: true,
+        sourceMap: true,
+        baseUrl,
+        strict: true,
+        resolveJsonModule: true,
+        allowSyntheticDefaultImports: true,
+
+        // Supported by vue only
+        ...(api.appData.framework === 'vue'
+          ? {
+              // TODO Actually, it should be vite mode, but here it is written as vue only
+              // Required in Vite https://vitejs.dev/guide/features.html#typescript
+              isolatedModules: true,
+            }
+          : {}),
+
+        paths: {
+          '@/*': [`${srcPrefix}*`],
+          '@@/*': [`${umiTempDir}/*`],
+          [`${api.appData.umi.importSource}`]: [umiDir],
+          [`${api.appData.umi.importSource}/typings`]: [
+            `${umiTempDir}/typings`,
+          ],
+          ...(api.config.vite
+            ? {
+                '@fs/*': ['*'],
+              }
+            : {}),
+        },
+      },
+      include: [
+        `${baseUrl}.${frameworkName}rc.ts`,
+        `${baseUrl}**/*.d.ts`,
+        `${baseUrl}**/*.ts`,
+        `${baseUrl}**/*.tsx`,
+        api.appData.framework === 'vue' && `${baseUrl}**/*.vue`,
+      ].filter(Boolean),
+    };
+
+    umiTsConfig = await api.applyPlugins({
+      key: 'modifyTSConfig',
+      type: api.ApplyPluginsType.modify,
+      initialValue: umiTsConfig,
+    });
 
     api.writeTmpFile({
       noPluginDir: true,
       path: 'tsconfig.json',
-      // x 1、basic config
-      // x 2、alias
-      // 3、language service platform
-      // 4、typing
-      content: JSON.stringify(
-        {
-          compilerOptions: {
-            target: 'esnext',
-            module: 'esnext',
-            moduleResolution: 'node',
-            importHelpers: true,
-            jsx: api.appData.framework === 'vue' ? 'preserve' : 'react-jsx',
-            esModuleInterop: true,
-            sourceMap: true,
-            baseUrl,
-            strict: true,
-            resolveJsonModule: true,
-            allowSyntheticDefaultImports: true,
-
-            // Supported by vue only
-            ...(api.appData.framework === 'vue'
-              ? {
-                  // TODO Actually, it should be vite mode, but here it is written as vue only
-                  // Required in Vite https://vitejs.dev/guide/features.html#typescript
-                  isolatedModules: true,
-                  // For `<script setup>`
-                  // See <https://devblogs.microsoft.com/typescript/announcing-typescript-4-5-beta/#preserve-value-imports>
-                  preserveValueImports: true,
-                }
-              : {}),
-
-            paths: {
-              '@/*': [`${srcPrefix}*`],
-              '@@/*': [`${umiTempDir}/*`],
-              [`${api.appData.umi.importSource}`]: [umiDir],
-              [`${api.appData.umi.importSource}/typings`]: [
-                `${umiTempDir}/typings`,
-              ],
-              ...(api.config.vite
-                ? {
-                    '@fs/*': ['*'],
-                  }
-                : {}),
-            },
-          },
-          include: [
-            `${baseUrl}.umirc.ts`,
-            `${baseUrl}**/*.d.ts`,
-            `${baseUrl}**/*.ts`,
-            `${baseUrl}**/*.tsx`,
-          ],
-        },
-        null,
-        2,
-      ),
+      content: JSON.stringify(umiTsConfig, null, 2),
     });
 
     // typings.d.ts
@@ -370,19 +379,15 @@ export default function EmptyRoute() {
       headerImports.push(`import clientLoaders from './loaders.js';`);
     }
     // routeProps is enabled for conventional routes
-    if (!api.userConfig.routes) {
+    // e.g. dumi 需要用到约定式路由但又不需要 routeProps
+    if (!api.userConfig.routes && api.isPluginEnable('routeProps')) {
       // routeProps":"routeProps['foo']" > ...routeProps['foo']
       routesString = routesString.replace(
         /"routeProps":"(routeProps\[.*?)"/g,
         '...$1',
       );
       // import: route props
-      // why has this branch? since test env don't build routeProps.js
-      if (process.env.NODE_ENV === 'test') {
-        headerImports.push(`import routeProps from './routeProps';`);
-      } else {
-        headerImports.push(`import routeProps from './routeProps.js';`);
-      }
+      headerImports.push(`import routeProps from './routeProps';`);
       // prevent override internal route props
       headerImports.push(`
 if (process.env.NODE_ENV === 'development') {

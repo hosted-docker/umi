@@ -235,6 +235,13 @@ depPerChunk 和 bigVendors 类似，不同的是把依赖按 package name + vers
 
 granularChunks 在 bigVendors 和 depPerChunk 之间取了中间值，同时又能在缓存效率上有更好的利用。无特殊场景，建议用 granularChunks 策略。
 
+## conventionLayout
+
+- 类型：`boolean`
+- 默认值：`undefined`
+
+`src/layouts/index.[tsx|vue|jsx|js]` 为约定式布局，默认开启。可通过配置 `conventionLayout: false` 关闭该默认行为。
+
 ## conventionRoutes
 
 - 类型：`{ base: string; exclude: RegExp[] }`
@@ -640,15 +647,18 @@ export default {
 - 类型：`string[]`
 - 默认值：`null`
 
-支持配置多个 favicon 文件。配置 favicons 路径，可以是绝对路径，也可以是基于项目根目录的相对路径。
+默认情况下，站点将使用约定 [`favicon`](../guides/directory-structure#favicon) 来创建图标的 meta 头标签。
 
-比如：
+通过如下方式自定义：
 
 ```js
-favicons: ['/assets/favicon.ico']
+favicons: [
+  // 完整地址
+  'https://domain.com/favicon.ico',
+  // 此时将指向 `/favicon.png` ，确保你的项目含有 `public/favicon.png`
+  '/favicon.png'
+]
 ```
-
-HTML 中会生成 `<link rel="shortcut icon" type="image/x-icon" href="/assets/favicon.ico" />`。
 
 ## forkTSChecker
 
@@ -730,12 +740,16 @@ headScripts: [
 
 ## https
 
-- 类型：`{ cert: string; key: string; hosts: string[] }`
+- 类型：`{ cert: string; key: string; hosts: string[]; http2?: boolean }`
 - 默认值：`{ hosts: ['127.0.0.1', 'localhost'] }`
 
-开启 dev 的 https 模式。
+开启 dev 的 https 模式，Umi 4 默认使用 [`mkcert`](https://github.com/FiloSottile/mkcert) 快捷创建证书，请确保已经安装。
 
-关于参数。`cert` 和 `key` 分别用于指定 cert 和 key 文件；`hosts` 用于指定要支持 https 访问的 host，默认是 `['127.0.0.1', 'localhost']`。
+关于参数。
+
+- `cert` 和 `key` 分别用于指定 cert 和 key 文件。
+- `hosts` 用于指定要支持 https 访问的 host，默认是 `['127.0.0.1', 'localhost']`。
+- `http2` 用于指定是否使用 HTTP 2.0 协议，默认是 true（使用 HTTP 2.0 在 Chrome 或 Edge 浏览器中中有偶然出现 `ERR_HTTP2_PROTOCOL_ERRO`报错，如有遇到，建议配置为 false）。
 
 示例，
 

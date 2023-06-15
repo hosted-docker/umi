@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { IApi, RUNTIME_TYPE_FILE_NAME } from 'umi';
-import { lodash, Mustache, winPath } from 'umi/plugin-utils';
+import { lodash, Mustache, NpmClientEnum, winPath } from 'umi/plugin-utils';
 import { resolveProjectDep } from './utils/resolveProjectDep';
 import { withTmpPath } from './utils/withTmpPath';
 
@@ -25,6 +25,8 @@ const getAllIcons = () => {
   );
 };
 
+const ANT_PRO_COMPONENT = '@ant-design/pro-components';
+
 export default (api: IApi) => {
   let antdVersion = '4.0.0';
   try {
@@ -40,11 +42,8 @@ export default (api: IApi) => {
   api.describe({
     key: 'layout',
     config: {
-      schema(Joi) {
-        return Joi.alternatives().try(
-          Joi.object(),
-          Joi.boolean().invalid(true),
-        );
+      schema({ zod }) {
+        return zod.record(zod.any());
       },
       onChange: api.ConfigChangeType.regenerateTmpFiles,
     },
@@ -56,7 +55,7 @@ export default (api: IApi) => {
    */
   const depList = [
     '@alipay/tech-ui',
-    '@ant-design/pro-components',
+    ANT_PRO_COMPONENT,
     '@ant-design/pro-layout',
   ];
 
@@ -86,10 +85,11 @@ export default (api: IApi) => {
       return join(cwd, 'node_modules', pkgHasDep);
     }
     // 如果项目中没有去找插件依赖的
-    return dirname(require.resolve('@ant-design/pro-components/package.json'));
+    return dirname(require.resolve(`${ANT_PRO_COMPONENT}/package.json`));
   };
 
   const pkgPath = winPath(getPkgPath());
+  const resolvedPkgPath = pkgPath || ANT_PRO_COMPONENT;
 
   api.modifyAppData((memo) => {
     const version = require(`${pkgPath}/package.json`).version;
@@ -111,9 +111,15 @@ export default (api: IApi) => {
     return memo;
   });
 
+  // use absolute path to types references in `npm/yarn` will cause case problems.
+  // https://github.com/umijs/umi/discussions/10947
+  const isFlattedDepsDir = [NpmClientEnum.npm, NpmClientEnum.yarn].includes(
+    api.appData.npmClient,
+  );
+
   api.onGenerateFiles(() => {
     const PKG_TYPE_REFERENCE = `/// <reference types="${
-      pkgPath || '@ant-design/pro-components'
+      isFlattedDepsDir ? ANT_PRO_COMPONENT : resolvedPkgPath
     }" />`;
     const hasInitialStatePlugin = api.config.initialState;
     // Layout.tsx
@@ -126,7 +132,7 @@ import type { IRoute } from 'umi';
 import React, { useMemo } from 'react';
 import {
   ProLayout,
-} from "${pkgPath || '@ant-design/pro-components'}";
+} from "${resolvedPkgPath}";
 import './Layout.less';
 import Logo from './Logo';
 import Exception from './Exception';
@@ -264,7 +270,17 @@ const { formatMessage } = useIntl();
         }
         return defaultDom;
       }}
-      itemRender={(route) => <Link to={route.path}>{route.breadcrumbName}</Link>}
+      itemRender={(route, _, routes) => {
+        const { breadcrumbName, title, path } = route;
+        const label = title || breadcrumbName
+        const last = routes[routes.length - 1]
+        if (last) {
+          if (last.path === path || last.linkPath === path) {
+            return <span>{label}</span>;
+          }
+        }
+        return <Link to={path}>{label}</Link>;
+      }}
       disableContentMargin
       fixSiderbar
       fixedHeader
@@ -319,9 +335,7 @@ const { formatMessage } = useIntl();
       path: 'types.d.ts',
       content: `
     ${PKG_TYPE_REFERENCE}
-    import type { ProLayoutProps, HeaderProps } from "${
-      pkgPath || '@ant-design/pro-components'
-    }";
+    import type { ProLayoutProps, HeaderProps } from "${resolvedPkgPath}";
     ${
       hasInitialStatePlugin
         ? `import type InitialStateType from '@@/plugin-initialState/@@initialState';
@@ -493,10 +507,25 @@ export function getRightRenderContent (opts: {
     ],
   };
   // antd@5 和  4.24 之后推荐使用 menu，性能更好
-  const dropdownProps =
-    version.startsWith("5.") || version.startsWith("4.24.")
-      ? { menu: langMenu }
-      : { overlay: <Menu {...langMenu} /> };
+  let dropdownProps;
+  if (version.startsWith("5.") || version.startsWith("4.24.")) {
+    dropdownProps = { menu: langMenu };
+  } else if (version.startsWith("3.")) {
+    dropdownProps = {
+      overlay: (
+        <Menu>
+          {langMenu.items.map((item) => (
+            <Menu.Item key={item.key} onClick={item.onClick}>
+              {item.label}
+            </Menu.Item>
+          ))}
+        </Menu>
+      ),
+    };
+  } else { // 需要 antd 4.20.0 以上版本
+    dropdownProps = { overlay: <Menu {...langMenu} /> };
+  }
+
 
   return (
     <div className="umi-plugin-layout-right anticon">

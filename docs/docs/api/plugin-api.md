@@ -32,16 +32,15 @@ e.g.
 api.describe({
   key: 'foo',
   config: {
-    default: 'Hello, Umi!',
     schema(joi){
       return joi.string();
     },
-    onChange: api.ConfigCHangeType.regenerateTmpFiles,
+    onChange: api.ConfigChangeType.regenerateTmpFiles,
   },
   enableBy: api.EnableBy.config,
 })
 ```
-这个例子中，插件的 `key` 为 `foo`，因此配置中的键名为 `foo`，配置的类型是字符串，默认值为 "Hello, Umi!"，当配置 `foo` 发生变化时，dev 只会重新生成临时文件。该插件只有在用户配置了 `foo` 之后才会启用。
+这个例子中，插件的 `key` 为 `foo`，因此配置中的键名为 `foo`，配置的类型是字符串，当配置 `foo` 发生变化时，dev 只会重新生成临时文件。该插件只有在用户配置了 `foo` 之后才会启用。
 
 ### isPluginEnable
 ```ts
@@ -276,7 +275,7 @@ api.addBeforeMiddlewares(() => {
 ### addEntryCode
 在入口文件的最后面添加代码（render 后）。传入的 fn 不需要参数，且需要返回一个 string 或者 string 数组。
 ```ts
-api.addEntryCode(() => `console.log('I am after render!)`);
+api.addEntryCode(() => `console.log('I am after render!')`);
 ```
 
 ### addEntryCodeAhead
@@ -407,7 +406,7 @@ api.modifyAppData((memo) => {
 ### modifyConfig
 修改配置，相较于用户的配置，这份是最终传给 Umi 使用的配置。传入的 fn 接收 config 作为第一个参数，并且返回它。另外 fn 可以接收 `{ paths }` 作为第二个参数。`paths` 保存了 Umi 的各个路径。
 ```ts
-api.modifyConfig((memo, { path }) => {
+api.modifyConfig((memo, { paths }) => {
   memo.alias = {
     ...memo.alias,
     '@': paths.absSrcPath
@@ -475,6 +474,18 @@ api.modifyRoutes((memo) => {
   return memo;
 })
 ```
+
+### modifyTSConfig
+
+修改临时目录下的 tsconfig 文件内容。
+
+```ts
+api.modifyTSConfig((memo) => {
+  memo.compilerOptions.paths['foo'] = ['bar'];
+  return memo;
+});
+```
+
 ### modifyViteConfig
 修改 vite 最终配置。 传入的 fn 接收 vite 的 Config 对象作为第一个参数并且返回它。另外 fn 还可以接收 `{ env }` 作为第二个参数，可以通过该参数获取当前的环境。
 ```ts

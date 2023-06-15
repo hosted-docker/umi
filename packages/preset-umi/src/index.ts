@@ -18,6 +18,7 @@ export default () => {
       require.resolve('./features/crossorigin/crossorigin'),
       require.resolve('./features/depsOnDemand/depsOnDemand'),
       require.resolve('./features/devTool/devTool'),
+      require.resolve('./features/esbuildHelperChecker/esbuildHelperChecker'),
       require.resolve('./features/esmi/esmi'),
       require.resolve('./features/exportStatic/exportStatic'),
       require.resolve('./features/favicons/favicons'),
@@ -54,6 +55,7 @@ export default () => {
       require.resolve('./features/webpack/webpack'),
       require.resolve('./features/swc/swc'),
       require.resolve('./features/ui/ui'),
+      require.resolve('./features/hmrGuardian/hmrGuardian'),
 
       // commands
       require.resolve('./commands/build'),
