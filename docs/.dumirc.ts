@@ -8,6 +8,8 @@ const UMI_DESCRIPTION =
 
 export default defineConfig({
   outputPath: '../dist',
+  base: '/mirror/umi-next',
+  publicPath: '/mirror/umi-next/',
   metas: [
     { property: 'og:image', content: OG_HOME },
     { property: 'og:url', content: 'https://umijs.org/' },
