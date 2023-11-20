@@ -2,7 +2,13 @@ import React, { ReactElement } from 'react';
 import * as ReactDomServer from 'react-dom/server';
 import { matchRoutes } from 'react-router-dom';
 import { Writable } from 'stream';
-import type { IRoutesById, IServerLoaderArgs, UmiRequest } from './types';
+import type {
+  IRoutesById,
+  IServerLoaderArgs,
+  MetadataLoader,
+  ServerLoader,
+  UmiRequest,
+} from './types';
 
 interface RouteLoaders {
   [key: string]: () => Promise<any>;
@@ -11,11 +17,6 @@ interface RouteLoaders {
 export type ServerInsertedHTMLHook = (callbacks: () => React.ReactNode) => void;
 
 interface CreateRequestServerlessOptions {
-  /**
-   * only return body html
-   * @example <div id="root">{app}</div> ...
-   */
-  withoutHTML?: boolean;
   /**
    * folder path for `build-manifest.json`
    */
@@ -35,6 +36,16 @@ interface CreateRequestHandlerOptions extends CreateRequestServerlessOptions {
   createHistory: (opts: any) => any;
   helmetContext?: any;
   ServerInsertedHTMLContext: React.Context<ServerInsertedHTMLHook | null>;
+}
+
+interface IExecLoaderOpts {
+  routeKey: string;
+  routesWithServerLoader: RouteLoaders;
+  serverLoaderArgs?: IServerLoaderArgs;
+}
+
+interface IExecMetaLoaderOpts extends IExecLoaderOpts {
+  serverLoaderData?: any;
 }
 
 const createJSXProvider = (
@@ -93,18 +104,33 @@ function createJSXGenerator(opts: CreateRequestHandlerOptions) {
       return;
     }
 
-    const loaderData: { [key: string]: any } = {};
+    const loaderData: Record<string, any> = {};
+    const metadata: Record<string, any> = {};
     await Promise.all(
       matches
         .filter((id: string) => routes[id].hasServerLoader)
         .map(
           (id: string) =>
             new Promise<void>(async (resolve) => {
-              loaderData[id] = await executeLoader(
-                id,
+              loaderData[id] = await executeLoader({
+                routeKey: id,
                 routesWithServerLoader,
                 serverLoaderArgs,
-              );
+              });
+              // 如果有metadataLoader，执行metadataLoader
+              // metadataLoader在serverLoader返回之后执行这样metadataLoader可以使用serverLoader的返回值
+              // 如果有多层嵌套路由和合并多层返回的metadata但最里层的优先级最高
+              if (routes[id].hasMetadataLoader) {
+                Object.assign(
+                  metadata,
+                  await executeMetadataLoader({
+                    routesWithServerLoader,
+                    routeKey: id,
+                    serverLoaderArgs,
+                    serverLoaderData: loaderData[id],
+                  }),
+                );
+              }
               resolve();
             }),
         ),
@@ -121,7 +147,7 @@ function createJSXGenerator(opts: CreateRequestHandlerOptions) {
       location: url,
       manifest,
       loaderData,
-      withoutHTML: opts.withoutHTML,
+      metadata,
     };
 
     const element = (await opts.getClientRootComponent(
@@ -178,11 +204,11 @@ export function createMarkupGenerator(opts: CreateRequestHandlerOptions) {
             html = html.replace(
               /(<\/head>)/,
               [
-                opts.helmetContext.helmet?.title?.toString(),
-                opts.helmetContext.helmet?.priority?.toString(),
-                opts.helmetContext.helmet?.meta?.toString(),
-                opts.helmetContext.helmet?.link?.toString(),
-                opts.helmetContext.helmet?.script?.toString(),
+                opts.helmetContext.helmet.title.toString(),
+                opts.helmetContext.helmet.priority.toString(),
+                opts.helmetContext.helmet.meta.toString(),
+                opts.helmetContext.helmet.link.toString(),
+                opts.helmetContext.helmet.script.toString(),
                 '$1',
               ]
                 .filter(Boolean)
@@ -219,14 +245,17 @@ export default function createRequestHandler(
   return async function (req: any, res: any, next: any) {
     // 切换路由场景下，会通过此 API 执行 server loader
     if (req.url.startsWith('/__serverLoader') && req.query.route) {
-      const loaderArgs: IServerLoaderArgs = {
-        request: req,
-      };
-      const data = await executeLoader(
-        req.query.route,
-        opts.routesWithServerLoader,
-        loaderArgs,
-      );
+      // 在浏览器中触发的__serverLoader请求的request应该和SSR时拿到的request一致，都是当前页面的URL
+      // 否则会导致serverLoader中的request.url和SSR时拿到的request.url不一致
+      // 进而导致浏览器中触发的__serverLoader请求传入的参数和SSR时拿到的参数不一致，导致数据不一致
+      const serverLoaderRequest = new Request(req.query.url, {
+        headers: req.headers,
+      });
+      const data = await executeLoader({
+        routeKey: req.query.route,
+        routesWithServerLoader: opts.routesWithServerLoader,
+        serverLoaderArgs: { request: serverLoaderRequest },
+      });
       res.status(200).json(data);
       return;
     }
@@ -293,10 +322,14 @@ export function createUmiServerLoader(opts: CreateRequestHandlerOptions) {
   return async function (req: UmiRequest) {
     const query = Object.fromEntries(new URL(req.url).searchParams);
     // 切换路由场景下，会通过此 API 执行 server loader
-    const loaderArgs: IServerLoaderArgs = {
-      request: req,
-    };
-    return executeLoader(query.route, opts.routesWithServerLoader, loaderArgs);
+    const serverLoaderRequest = new Request(query.url, {
+      headers: req.headers,
+    });
+    return await executeLoader({
+      routeKey: query.route,
+      routesWithServerLoader: opts.routesWithServerLoader,
+      serverLoaderArgs: { request: serverLoaderRequest },
+    });
   };
 }
 
@@ -335,15 +368,29 @@ function createClientRoute(route: any) {
   };
 }
 
-async function executeLoader(
-  routeKey: string,
-  routesWithServerLoader: RouteLoaders,
-  serverLoaderArgs?: IServerLoaderArgs,
-) {
+async function executeLoader(params: IExecLoaderOpts) {
+  const { routeKey, routesWithServerLoader, serverLoaderArgs } = params;
   const mod = await routesWithServerLoader[routeKey]();
   if (!mod.serverLoader || typeof mod.serverLoader !== 'function') {
     return;
   }
   // TODO: 处理错误场景
-  return mod.serverLoader(serverLoaderArgs);
+  return (mod.serverLoader satisfies ServerLoader)(serverLoaderArgs);
+}
+
+async function executeMetadataLoader(params: IExecMetaLoaderOpts) {
+  const {
+    routesWithServerLoader,
+    routeKey,
+    serverLoaderArgs,
+    serverLoaderData,
+  } = params;
+  const mod = await routesWithServerLoader[routeKey]();
+  if (!mod.serverLoader || typeof mod.serverLoader !== 'function') {
+    return;
+  }
+  return (mod.metadataLoader satisfies MetadataLoader)(
+    serverLoaderData,
+    serverLoaderArgs,
+  );
 }
