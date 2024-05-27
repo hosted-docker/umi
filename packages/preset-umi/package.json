@@ -1,6 +1,6 @@
 {
   "name": "@umijs/preset-umi",
-  "version": "4.1.5",
+  "version": "4.2.5",
   "description": "@umijs/preset-umi",
   "homepage": "https://github.com/umijs/umi/tree/master/packages/preset-umi#readme",
   "bugs": "https://github.com/umijs/umi/issues",
@@ -30,6 +30,7 @@
     "@umijs/ast": "workspace:*",
     "@umijs/babel-preset-umi": "workspace:*",
     "@umijs/bundler-esbuild": "workspace:*",
+    "@umijs/bundler-mako": "0.4.17",
     "@umijs/bundler-utils": "workspace:*",
     "@umijs/bundler-vite": "workspace:*",
     "@umijs/bundler-webpack": "workspace:*",
@@ -45,6 +46,7 @@
     "@umijs/utils": "workspace:*",
     "@umijs/zod2ts": "workspace:*",
     "babel-plugin-dynamic-import-node": "2.3.3",
+    "babel-plugin-react-compiler": "0.0.0-experimental-c23de8d-20240515",
     "click-to-react-component": "^1.0.8",
     "core-js": "3.34.0",
     "current-script-polyfill": "1.0.0",
