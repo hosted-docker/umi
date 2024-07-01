@@ -257,6 +257,7 @@ PORT=8888 umi dev
           },
         });
       }
+
       watchPublicDirChange();
 
       // start dev server
@@ -304,6 +305,7 @@ PORT=8888 umi dev
 
       if (api.config.mfsu?.strategy === 'eager') {
         srcCodeCache = new LazySourceCodeCache({
+          root: api.paths.cwd,
           cwd: api.paths.absSrcPath,
           cachePath: join(
             api.paths.absNodeModulesPath,
@@ -355,7 +357,10 @@ PORT=8888 umi dev
         react: {
           runtime: shouldUseAutomaticRuntime ? 'automatic' : 'classic',
         },
-        config: api.config,
+        config: {
+          outputPath: api.userConfig.outputPath || 'dist',
+          ...api.config,
+        },
         pkg: api.pkg,
         cwd: api.cwd,
         rootDir: process.cwd(),
@@ -431,8 +436,9 @@ PORT=8888 umi dev
 
       if (enableVite) {
         await bundlerVite.dev(opts);
-      } else if (process.env.OKAM) {
+      } else if (api.config.mako) {
         require('@umijs/bundler-webpack/dist/requireHook');
+        // @ts-ignore
         const { dev } = require(process.env.OKAM);
         await dev(opts);
       } else {
